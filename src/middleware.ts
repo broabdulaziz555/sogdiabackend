@@ -12,7 +12,7 @@ export function middleware(request: NextRequest) {
         headers: {
           'Access-Control-Allow-Origin': '*', // Allows your frontend to connect
           'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-api-key',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-api-key, Idempotency-Key',
         },
       })
     }
