@@ -1,0 +1,86 @@
+import { ApiError, handle, ok, readJson } from '@/lib/http';
+import { requireStaff } from '@/lib/permissions';
+import { supabaseAdmin } from '@/lib/supabase';
+import { certificateImageUrl, issueCertificate } from '@/lib/certificates';
+import { audit } from '@/lib/audit';
+import { notify } from '@/lib/notifications';
+import { adminCertificateSchema, paginationSchema } from '@/lib/validation';
+import type { DbCertificate } from '@/lib/types';
+
+export const dynamic = 'force-dynamic';
+
+/** GET /api/admin/certificates?user_id=&type=&limit=&offset= */
+export const GET = handle(async (req) => {
+  await requireStaff(req);
+  const url = new URL(req.url);
+  const { limit, offset } = paginationSchema.parse({
+    limit: url.searchParams.get('limit') ?? undefined,
+    offset: url.searchParams.get('offset') ?? undefined,
+  });
+
+  let query = supabaseAdmin()
+    .from('certificates')
+    .select('*, users(email, full_name)', { count: 'exact' })
+    .order('issued_at', { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  const userId = url.searchParams.get('user_id');
+  const type = url.searchParams.get('type');
+  if (userId) query = query.eq('user_id', userId);
+  if (type) query = query.eq('type', type);
+
+  const { data, error, count } = await query;
+  if (error) throw new ApiError('INTERNAL_ERROR', error.message);
+
+  const rows = (data ?? []) as Array<DbCertificate & { users: { email: string } | null }>;
+
+  return ok({
+    certificates: rows.map(({ users, ...c }) => ({
+      ...c,
+      amount: Number(c.amount),
+      user_email: users?.email ?? null,
+      image_url: certificateImageUrl(c.id),
+    })),
+    total: count ?? rows.length,
+    limit,
+    offset,
+  });
+});
+
+/** POST /api/admin/certificates — manual issuance. */
+export const POST = handle(async (req) => {
+  const staff = await requireStaff(req);
+  const body = adminCertificateSchema.parse(await readJson(req));
+
+  const certificate = await issueCertificate({
+    user_id: body.user_id,
+    account_id: body.account_id ?? null,
+    type: body.type,
+    amount: body.amount,
+    display_name: body.display_name,
+    is_manual: true,
+    issued_by: staff.id,
+    metadata: { issued_via: 'admin_panel' },
+  });
+
+  await audit(
+    staff,
+    'certificate.manual',
+    { type: 'certificate', id: certificate.id },
+    { user_id: body.user_id, type: body.type, amount: body.amount },
+    req,
+  );
+
+  await notify(
+    body.user_id,
+    'certificate_issued',
+    'New certificate issued',
+    `A ${body.type === 'payout' ? 'payout' : 'evaluation'} certificate has been added to your profile.`,
+    { certificate_id: certificate.id },
+  );
+
+  return ok({
+    certificate: { ...certificate, amount: Number(certificate.amount) },
+    image_url: certificateImageUrl(certificate.id),
+  });
+});
