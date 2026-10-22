@@ -61,35 +61,57 @@ export interface DiscountQuote {
  */
 const PENDING_HOLD_MS = 2 * 60 * 60 * 1000;
 
-/** Redemptions that count: paid, plus invoices still open. */
-function countsAsRedemption(query: ReturnType<ReturnType<typeof supabaseAdmin>['from']>) {
+/**
+ * Count the transactions that consume a redemption of `code`: paid
+ * purchases, plus invoices still inside the hold window.
+ *
+ * Two plain counts rather than one `or()` with a nested `and()` — the
+ * filters here are unambiguous and individually verifiable, which the
+ * nested form is not.
+ *
+ * Pass `userId` to count one customer's redemptions only.
+ */
+async function countRedemptions(code: string, userId?: string): Promise<number> {
+  const admin = supabaseAdmin();
+  const codeUpper = code.toUpperCase();
   const since = new Date(Date.now() - PENDING_HOLD_MS).toISOString();
-  return (query as any).or(`status.eq.paid,and(status.eq.pending,created_at.gte.${since})`);
+
+  let paidQuery = admin
+    .from('transactions')
+    .select('id', { count: 'exact', head: true })
+    .eq('type', 'purchase')
+    .eq('metadata->>promo_code', codeUpper)
+    .eq('status', 'paid');
+
+  let pendingQuery = admin
+    .from('transactions')
+    .select('id', { count: 'exact', head: true })
+    .eq('type', 'purchase')
+    .eq('metadata->>promo_code', codeUpper)
+    .eq('status', 'pending')
+    .gte('created_at', since);
+
+  if (userId) {
+    paidQuery = paidQuery.eq('user_id', userId);
+    pendingQuery = pendingQuery.eq('user_id', userId);
+  }
+
+  const [paid, pending] = await Promise.all([paidQuery, pendingQuery]);
+
+  if (paid.error) console.error('[promos] paid count failed', paid.error.message);
+  if (pending.error) console.error('[promos] pending count failed', pending.error.message);
+
+  return (paid.count ?? 0) + (pending.count ?? 0);
 }
 
 /** How many times a promo has been redeemed, across all customers. */
 export async function promoUses(code: string): Promise<number> {
-  const base = supabaseAdmin()
-    .from('transactions')
-    .select('id', { count: 'exact', head: true })
-    .eq('type', 'purchase')
-    .eq('metadata->>promo_code', code.toUpperCase());
-
-  const { count } = await countsAsRedemption(base);
-  return count ?? 0;
+  return countRedemptions(code);
 }
 
 /** How many times ONE customer has redeemed a promo. */
 export async function promoUsesByUser(code: string, userId: string): Promise<number> {
-  const base = supabaseAdmin()
-    .from('transactions')
-    .select('id', { count: 'exact', head: true })
-    .eq('type', 'purchase')
-    .eq('user_id', userId)
-    .eq('metadata->>promo_code', code.toUpperCase());
-
-  const { count } = await countsAsRedemption(base);
-  return count ?? 0;
+  return countRedemptions(code, userId);
 }
 
 export type PromoRejection =
