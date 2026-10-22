@@ -128,6 +128,10 @@ export async function sweepLiquidations(positions: Position[]): Promise<AutoClos
         : pnlFor(p.side, Number(p.entry_price), trigger.price, Number(p.quantity));
 
     try {
+      console.log('[engine] auto-close', {
+        order_id: p.id, symbol: p.symbol, side: p.side, reason: trigger.reason,
+        mark: p.mark_price, entry: p.entry_price, liq: p.liquidation_price, sl: p.stop_loss, tp: p.take_profit, leverage: p.leverage,
+      });
       await settleOrder(p.id, trigger.price, pnl, trigger.status, trigger.reason);
       closed.push({
         id: p.id,

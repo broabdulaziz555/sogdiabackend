@@ -140,6 +140,10 @@ export const POST = handle(async (req) => {
 
     // The order is stored, so the trade is real from here on: nothing below may turn into a rejected order
     // (the UI would drop the position and the trader would re-send it, doubling up).
+    console.log('[trade/open] stored', {
+      order_id: order.id, account_id: account.id, symbol, side: body.side, leverage: body.leverage,
+      margin: body.margin, mid, entry, liq,
+    });
     const position = toPosition(order, mid);
     const metrics = existing ? computeMetrics(account, [position, ...existing]) : null;
 
