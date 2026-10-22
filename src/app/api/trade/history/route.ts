@@ -30,7 +30,10 @@ export const GET = handle(async (req) => {
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
 
-  if (status) query = query.eq('status', status);
+  // "closed" as the clients use it means every finished trade — liquidations included. Matching the literal
+  // status hid liquidated positions from History altogether.
+  if (status === 'open') query = query.eq('status', 'open');
+  else if (status === 'liquidated') query = query.eq('status', 'liquidated');
   else query = query.in('status', ['closed', 'liquidated']);
 
   const { data, error, count } = await query;
