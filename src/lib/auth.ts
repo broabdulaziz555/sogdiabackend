@@ -1,5 +1,6 @@
 import { ApiError, requireEnv } from '@/lib/http';
 import { supabaseAdmin } from '@/lib/supabase';
+import { isStaffRole, normalizeRole } from '@/lib/roles';
 import type { DbAccount, DbUser } from '@/lib/types';
 
 function bearer(req: Request): string {
@@ -11,7 +12,14 @@ function bearer(req: Request): string {
   return token;
 }
 
-/** Resolve the caller from their Supabase JWT. */
+/**
+ * Resolve the caller from their Supabase JWT.
+ *
+ * Reads the profile with the SERVICE-ROLE client, so RLS never applies
+ * to this lookup. If this throws "User profile not found", the likely
+ * cause is SUPABASE_SERVICE_ROLE_KEY actually holding the anon key —
+ * under RLS with no auth context the select returns zero rows.
+ */
 export async function requireUser(req: Request): Promise<DbUser> {
   const token = bearer(req);
   const admin = supabaseAdmin();
@@ -21,28 +29,70 @@ export async function requireUser(req: Request): Promise<DbUser> {
     throw new ApiError('UNAUTHORIZED', 'Invalid or expired session.');
   }
 
+  const authUserId = authData.user.id;
+
+  // maybeSingle, so a genuine DB/permission failure is distinguishable
+  // from "the row isn't there" instead of collapsing into one message.
   const { data: profile, error } = await admin
     .from('users')
     .select('*')
-    .eq('id', authData.user.id)
-    .single<DbUser>();
+    .eq('id', authUserId)
+    .maybeSingle<DbUser>();
 
-  if (error || !profile) {
-    throw new ApiError('UNAUTHORIZED', 'User profile not found.');
+  if (error) {
+    console.error('[auth] profile lookup failed', { authUserId, error: error.message });
+    throw new ApiError(
+      'INTERNAL_ERROR',
+      'Could not read the user profile.',
+      { auth_user_id: authUserId, db_error: error.message },
+    );
   }
-  return profile;
+
+  if (!profile) {
+    throw new ApiError(
+      'UNAUTHORIZED',
+      'User profile not found. The auth user exists but has no row in public.users.',
+      { auth_user_id: authUserId },
+    );
+  }
+
+  // Normalise once, here, so every downstream guard compares a clean value.
+  const role = normalizeRole(profile.role);
+  if (role === null) {
+    console.error('[auth] unrecognised role in public.users', {
+      user_id: profile.id,
+      email: profile.email,
+      raw_role: JSON.stringify(profile.role),
+    });
+    throw new ApiError(
+      'FORBIDDEN',
+      'Your account has an unrecognised role. Contact an administrator.',
+      { user_id: profile.id, raw_role: String(profile.role) },
+    );
+  }
+
+  return { ...profile, role };
 }
 
-/** admin or xdepartment. See lib/permissions.ts for the full ladder. */
+/**
+ * Staff guard: admin or xdepartment.
+ * Kept as an alias of the same predicate `requireStaff` uses, so the two
+ * entry points can never drift apart.
+ */
 export async function requireAdmin(req: Request): Promise<DbUser> {
   const user = await requireUser(req);
-  if (user.role !== 'admin' && user.role !== 'xdepartment') {
-    throw new ApiError('FORBIDDEN', 'Admin privileges required.');
+
+  if (!isStaffRole(user.role)) {
+    throw new ApiError(
+      'FORBIDDEN',
+      'Admin privileges required.',
+      { user_id: user.id, role: user.role, required: 'admin or xdepartment' },
+    );
   }
   return user;
 }
 
-/** Load an account and assert the caller owns it (admins bypass). */
+/** Load an account and assert the caller may see it (staff bypass). */
 export async function requireAccount(
   accountId: string,
   user: DbUser,
@@ -54,9 +104,19 @@ export async function requireAccount(
     .maybeSingle<DbAccount>();
 
   if (error) throw new ApiError('INTERNAL_ERROR', error.message);
-  if (!data) throw new ApiError('NOT_FOUND', 'Account not found.');
-  if (data.user_id !== user.id && user.role === 'trader') {
-    throw new ApiError('FORBIDDEN', 'This account belongs to another user.');
+
+  // Name the id that was asked for: a stale account id sent by a client
+  // must not be mistakable for a problem with the account it displays.
+  if (!data) {
+    throw new ApiError('NOT_FOUND', `Account ${accountId} does not exist.`, {
+      requested_account_id: accountId,
+    });
+  }
+
+  if (data.user_id !== user.id && !isStaffRole(user.role)) {
+    throw new ApiError('FORBIDDEN', `Account ${accountId} belongs to another user.`, {
+      requested_account_id: accountId,
+    });
   }
   return data;
 }

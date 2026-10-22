@@ -6,11 +6,16 @@ import type { AccountStatus } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
-/** GET /api/admin/stats — operations dashboard. */
+/**
+ * GET /api/admin/stats — operations dashboard.
+ * Staff only: admin or xdepartment.
+ */
 export const GET = handle(async (req) => {
-  await requireStaff(req);
-  const admin = supabaseAdmin();
+  // Guard first. Throws 401 if the token is bad, 403 if the role is not
+  // staff — and the 403 body carries the role the backend actually read.
+  const actor = await requireStaff(req);
 
+  const admin = supabaseAdmin();
   const statuses: AccountStatus[] = ['active', 'passed', 'failed', 'frozen', 'breached', 'closed'];
 
   const [
@@ -58,5 +63,8 @@ export const GET = handle(async (req) => {
     payouts_pending: pendingPayoutRes.count ?? 0,
     kyc_pending: kycRes.count ?? 0,
     open_positions: openRes.count ?? 0,
+    // Echoed back so the panel can confirm which identity the backend
+    // resolved — useful when a 403 turns out to be the wrong account.
+    viewer: { id: actor.id, email: actor.email, role: actor.role },
   });
 });
