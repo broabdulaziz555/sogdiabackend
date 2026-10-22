@@ -1,6 +1,6 @@
 import { handle, ok } from '@/lib/http';
 import { requireAccount, requireUser } from '@/lib/auth';
-import { evaluateAccount } from '@/lib/engine';
+import { evaluateAccount, getOpenOrders } from '@/lib/engine';
 import { serializeAccount } from '@/lib/accounts';
 import { accountIdSchema } from '@/lib/validation';
 
@@ -18,8 +18,9 @@ export const GET = handle(async (req) => {
     account_id: url.searchParams.get('account_id'),
   });
 
-  const account = await requireAccount(account_id, user);
-  const result = await evaluateAccount(account);
+  // The account row (with its ownership check) and the open orders are read side by side: one round trip fewer per poll.
+  const [account, orders] = await Promise.all([requireAccount(account_id, user), getOpenOrders(account_id)]);
+  const result = await evaluateAccount(account, orders);
 
   return ok({
     positions: result.positions,

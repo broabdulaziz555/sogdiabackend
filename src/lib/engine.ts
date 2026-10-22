@@ -209,11 +209,11 @@ export interface EvaluationResult {
  *   4. pass the account if the evaluation target is met
  *   5. persist the equity snapshot
  */
-export async function evaluateAccount(input: DbAccount | string): Promise<EvaluationResult> {
+export async function evaluateAccount(input: DbAccount | string, preloadedOrders?: DbOrder[]): Promise<EvaluationResult> {
   let account = typeof input === 'string' ? await getAccount(input) : input;
 
-  // 1 — liquidation sweep
-  let orders = await getOpenOrders(account.id);
+  // 1 — liquidation sweep (callers that already read the open orders pass them in, saving a database round trip)
+  let orders = preloadedOrders ?? (await getOpenOrders(account.id));
   let positions = await buildPositions(orders);
   const liquidated = await sweepLiquidations(positions);
 
