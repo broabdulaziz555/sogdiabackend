@@ -50,7 +50,7 @@ Authorization: Bearer <supabase_access_token>
 |---|---|---|
 | `VALIDATION_ERROR` | 400 | Body/query failed schema validation. `details` holds field errors. |
 | `UNAUTHORIZED` | 401 | Missing/invalid/expired bearer token. |
-| `FORBIDDEN` | 403 | Authenticated but not allowed (not owner / not admin). |
+| `FORBIDDEN` | 403 | Authenticated but not allowed (not owner / not staff). On a role failure, `details` carries `{ user_id, email, role_in_database, required, hint }` — `role_in_database` is the role the backend actually read, which makes a wrong-account or malformed-role mismatch self-diagnosing. |
 | `NOT_FOUND` | 404 | Resource does not exist or is not visible to the caller. |
 | `ACCOUNT_NOT_TRADABLE` | 409 | Account status is not `active`. |
 | `ORDER_NOT_OPEN` | 409 | Order already closed or liquidated. |
@@ -103,6 +103,8 @@ Authorization: Bearer <supabase_access_token>
 ```
 
 **AccountMetrics** (computed, never stored stale)
+
+> `free_margin` is `balance − used_margin` and is **not clamped at zero**: an over-committed account reports a negative figure rather than a plausible `0`. A missing or non-numeric `balance`/`size`/`daily_start_balance` returns `INTERNAL_ERROR` naming the field, never a margin rejection.
 ```json
 {
   "equity": 10388.2,

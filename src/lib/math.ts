@@ -113,7 +113,30 @@ export function toPosition(order: DbOrder, midPrice: number): Position {
   };
 }
 
-/** Sum of posted margin across open positions. */
-export function usedMargin(orders: Array<Pick<DbOrder, 'margin'>>): number {
-  return money(orders.reduce((sum, o) => sum + Number(o.margin), 0));
+/**
+ * Sum of posted margin across open positions.
+ *
+ * Throws on a non-numeric margin rather than letting `Number(null) === 0`
+ * or a NaN quietly shrink the total — an understated used-margin figure
+ * silently lets a trader over-commit, and an overstated one looks
+ * identical to a legitimate "no free margin".
+ */
+export function usedMargin(orders: Array<Pick<DbOrder, 'margin'> & { id?: string }>): number {
+  let total = 0;
+
+  for (const order of orders) {
+    const value = order.margin as unknown;
+    if (value === null || value === undefined || value === '') {
+      throw new Error(`Order ${order.id ?? '(unknown)'} has no margin value.`);
+    }
+    const margin = Number(value);
+    if (!Number.isFinite(margin)) {
+      throw new Error(
+        `Order ${order.id ?? '(unknown)'} has a non-numeric margin: ${JSON.stringify(value)}.`,
+      );
+    }
+    total += margin;
+  }
+
+  return money(total);
 }

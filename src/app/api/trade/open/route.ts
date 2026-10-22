@@ -5,6 +5,7 @@ import { assertTradable, getPrice } from '@/lib/binance';
 import {
   applySpread,
   liquidationPrice,
+  money,
   positionSize,
   quantity,
   toPosition,
@@ -44,13 +45,43 @@ export const POST = handle(async (req) => {
   }
 
   // Free margin = realised balance minus margin already posted.
+  // Computed by the same computeMetrics() the account and positions
+  // endpoints use, against the account row this request names — so the
+  // figure shown in the UI and the figure validated here are one value.
   const openOrders = await getOpenOrders(account.id);
   const existing = await buildPositions(openOrders);
   const preMetrics = computeMetrics(account, existing);
+
+  // Full breakdown, attached to both the log and the error, so a
+  // rejection can always be traced to the account row it came from.
+  const snapshot = {
+    account_id: account.id,
+    account_status: account.status,
+    balance: Number(account.balance),
+    equity: preMetrics.equity,
+    unrealized_pnl: preMetrics.unrealized_pnl,
+    used_margin: preMetrics.used_margin,
+    free_margin: preMetrics.free_margin,
+    open_positions: preMetrics.open_positions,
+    required_margin: body.margin,
+    leverage: body.leverage,
+    notional: positionSize(body.margin, body.leverage),
+    symbol,
+  };
+
+  if (process.env.TRADE_DEBUG === '1') {
+    console.log('[trade/open] margin check', snapshot);
+  }
+
   if (body.margin > preMetrics.free_margin) {
+    console.error('[trade/open] rejected: insufficient margin', snapshot);
+
     throw new ApiError(
       'INSUFFICIENT_MARGIN',
-      `Margin ${body.margin} exceeds free margin ${preMetrics.free_margin}.`,
+      `Margin $${body.margin} exceeds free margin $${preMetrics.free_margin} on account ${account.id} ` +
+        `(balance $${snapshot.balance} − $${preMetrics.used_margin} used across ` +
+        `${preMetrics.open_positions} open position${preMetrics.open_positions === 1 ? '' : 's'}).`,
+      { ...snapshot, shortfall: money(body.margin - preMetrics.free_margin) },
     );
   }
 
