@@ -15,20 +15,23 @@ law.
 ## 2. Market Data and Order Execution
 
 SOGDIA provides a proprietary trading evaluation and capital-allocation
-program. Subject to the applicable account agreement, orders submitted through
-eligible accounts are routed to designated execution partners for execution in
-the relevant financial markets.
-
-Where live execution applies, the resulting transactions are subject to the
-execution venue's or counterparty's available liquidity, market conditions,
-trading hours, order acceptance criteria and applicable execution policies.
-Orders may be partially filled, rejected, cancelled or executed at a price
-different from the displayed reference price.
+program. Orders submitted through SOGDIA accounts are executed against SOGDIA's
+execution engine using reference prices obtained from third-party venues, as
+set out in the Execution Disclosure (`/legal/execution`). Trader orders are not
+routed to an external execution venue.
 
 SOGDIA's trading interface may display market data obtained from third-party
 providers. Displayed reference prices are not a guarantee of the price at which
-an order will execute. Actual execution details are determined by the
-applicable execution records.
+an order will execute. Orders may be rejected or cancelled, or executed at a
+price different from the displayed reference price. Actual execution details
+are determined by SOGDIA's execution records.
+
+Where an account is designated for live-market execution under its account
+agreement, the resulting transactions are additionally subject to the execution
+venue's or counterparty's available liquidity, market conditions, trading
+hours, order acceptance criteria and applicable execution policies, and may be
+partially filled or rejected. SOGDIA will identify any such account in its
+account terms.
 
 ## 3. Trading Costs
 
