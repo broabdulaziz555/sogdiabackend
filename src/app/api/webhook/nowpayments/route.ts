@@ -84,27 +84,49 @@ export const POST = handle(async (req) => {
   const plan = getPlan(planKey);
   if (!plan) throw new ApiError('INTERNAL_ERROR', `Transaction references unknown plan "${planKey}".`);
 
-  const account = await createAccountFromPlan(tx.user_id, plan);
-
-  await admin
+  // Claim the transaction atomically BEFORE creating anything. NOWPayments often sends "confirmed" and
+  // "finished" back to back; without the claim both deliveries pass the check above and the buyer gets two accounts.
+  const { data: claimed, error: claimErr } = await admin
     .from('transactions')
-    .update({
-      status: 'paid',
-      account_id: account.id,
-      nowpayments_payment_id: paymentId,
-      metadata,
-    })
+    .update({ status: 'paid', nowpayments_payment_id: paymentId, metadata })
+    .eq('id', tx.id)
+    .neq('status', 'paid')
+    .select('id')
+    .maybeSingle<{ id: string }>();
+
+  if (claimErr) throw new ApiError('INTERNAL_ERROR', claimErr.message);
+  if (!claimed) {
+    return ok({ received: true, account_created: false, account_id: null, replay: true });
+  }
+
+  let account;
+  try {
+    account = await createAccountFromPlan(tx.user_id, plan);
+  } catch (err) {
+    // Hand the claim back and answer 5xx so NOWPayments retries the notification.
+    await admin.from('transactions').update({ status: tx.status }).eq('id', tx.id);
+    throw err;
+  }
+
+  const { error: linkErr } = await admin
+    .from('transactions')
+    .update({ account_id: account.id })
     .eq('id', tx.id);
+  if (linkErr) console.error('[ipn] could not link account to transaction', tx.id, linkErr.message);
 
-  await notify(
-    tx.user_id,
-    'account_created',
-    `${plan.label} is live`,
-    `Your ${plan.label} account has been funded with $${plan.size.toLocaleString()} of virtual capital. Good luck.`,
-    { account_id: account.id, plan_key: plan.key },
-  );
-
-  await creditReferral(tx.user_id, tx.id, Number(tx.amount));
+  // The buyer already has the account; a failed notification or referral credit must not make the webhook retry.
+  try {
+    await notify(
+      tx.user_id,
+      'account_created',
+      `${plan.label} is live`,
+      `Your ${plan.label} account has been funded with $${plan.size.toLocaleString()} of virtual capital. Good luck.`,
+      { account_id: account.id, plan_key: plan.key },
+    );
+    await creditReferral(tx.user_id, tx.id, Number(tx.amount));
+  } catch (err) {
+    console.error('[ipn] post-purchase step failed', tx.id, err);
+  }
 
   return ok({ received: true, account_created: true, account_id: account.id });
 });
