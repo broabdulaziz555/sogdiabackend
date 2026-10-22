@@ -58,6 +58,17 @@ export const POST = handle(async (req) => {
     );
   }
 
+  // One open request per account: a double click or a second request must not pay the same profit twice.
+  const { count: pendingCount } = await supabaseAdmin()
+    .from('transactions')
+    .select('id', { count: 'exact', head: true })
+    .eq('account_id', account.id)
+    .eq('type', 'payout')
+    .eq('status', 'pending');
+  if ((pendingCount ?? 0) > 0) {
+    throw new ApiError('PAYOUT_NOT_ELIGIBLE', 'A payout request for this account is already under review.');
+  }
+
   const gross = body.amount ?? eligibility.profit;
   if (gross > eligibility.profit) {
     throw new ApiError(
