@@ -10,9 +10,8 @@ import {
   quantity,
   toPosition,
 } from '@/lib/math';
-import { buildPositions, evaluateAccount, getOpenOrders } from '@/lib/engine';
+import { buildPositions, getOpenOrders } from '@/lib/engine';
 import { computeMetrics, isTradable } from '@/lib/risk';
-import { serializeAccount } from '@/lib/accounts';
 import { openTradeSchema } from '@/lib/validation';
 import { rateLimit } from '@/lib/ratelimit';
 import type { DbOrder } from '@/lib/types';
@@ -35,9 +34,13 @@ export const dynamic = 'force-dynamic';
  * about equity or drawdown (beyond the diagnostic log) is allowed to gate
  * the order.
  *
- * The risk engine (evaluateAccount → checkBreach) runs strictly AFTER the
- * order is persisted, to catch a position that breaches the floor the
- * instant it opens.
+ * The risk engine (evaluateAccount → checkBreach) is NOT run in this
+ * route, before or after the insert. The response goes out as soon as the
+ * order is persisted; liquidation and drawdown-breach evaluation is done
+ * by GET /api/trade/positions, which the terminal polls (and re-polls
+ * ~1.5 s after every open). Keeping evaluateAccount out of this request
+ * keeps opening a position fast and means a slow price feed or DB write
+ * can never make a saved order look rejected.
  */
 export const POST = handle(async (req) => {
   const user = await requireUser(req);
@@ -130,34 +133,8 @@ export const POST = handle(async (req) => {
 
   if (error) throw new ApiError('INTERNAL_ERROR', error.message);
 
-  // Post-trade risk evaluation. The order is already persisted, so the
-  // trade is real from here on: if evaluation fails (price-feed hiccup, DB
-  // blip) that must NOT surface as a rejected order — the UI would drop the
-  // position and the trader would re-send it, doubling up. /trade/positions
-  // re-runs the same evaluation on its next poll, so a breach is still
-  // enforced, just a few seconds later.
-  let result: Awaited<ReturnType<typeof evaluateAccount>> | null = null;
-  try {
-    result = await evaluateAccount(account.id);
-  } catch (err) {
-    console.error('[trade/open] order opened but post-trade evaluation failed', {
-      account_id: account.id,
-      order_id: order.id,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
-
-  return ok({
-    order: toPosition(order, mid),
-    ...(result && {
-      account: serializeAccount(result.account),
-      metrics: result.metrics,
-      // Same shape /trade/close returns, so a client can see an instant breach.
-      risk: {
-        breached: result.risk.breached,
-        reason: result.risk.reason,
-        status: result.risk.status,
-      },
-    }),
-  });
+  // Respond immediately. `account` / `metrics` are intentionally omitted:
+  // the terminal treats them as optional and refreshes both from
+  // /trade/positions right after this call.
+  return ok({ order: toPosition(order, mid) });
 });
