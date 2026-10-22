@@ -21,49 +21,51 @@ function bearer(req: Request): string {
  * under RLS with no auth context the select returns zero rows.
  */
 export async function requireUser(req: Request): Promise<DbUser> {
-  const token = bearer(req);
-
-  // A verified session is reused for a few seconds: the terminal fires a request every 2-4 s and each
-  // verification is two sequential Supabase round trips. Role / profile edits show up within the TTL.
-  const hit = userCache.get(token);
-  if (hit && Date.now() - hit.at < USER_TTL_MS) return hit.user;
-
-  const user = await resolveUser(token);
-  userCache.set(token, { user, at: Date.now() });
-  if (userCache.size > 5_000) {
-    const now = Date.now();
-    for (const [k, v] of userCache) if (now - v.at >= USER_TTL_MS) userCache.delete(k);
-  }
-  return user;
+  return resolveUser(bearer(req));
 }
 
-const USER_TTL_MS = 30_000;
-const userCache = new Map<string, { user: DbUser; at: number }>();
+/**
+ * Only the token -> auth user id step is remembered (for a few seconds). The profile row is always read fresh, so
+ * a role change, KYC approval or wallet update is visible on the very next request.
+ */
+const TOKEN_TTL_MS = 30_000;
+const verifiedTokens = new Map<string, { id: string; at: number }>();
 
-async function resolveUser(token: string): Promise<DbUser> {
-  const admin = supabaseAdmin();
+async function authUserId(token: string): Promise<string> {
+  const hit = verifiedTokens.get(token);
+  if (hit && Date.now() - hit.at < TOKEN_TTL_MS) return hit.id;
 
-  const { data: authData, error: authError } = await admin.auth.getUser(token);
-  if (authError || !authData?.user) {
+  const { data, error } = await supabaseAdmin().auth.getUser(token);
+  if (error || !data?.user) {
     throw new ApiError('UNAUTHORIZED', 'Invalid or expired session.');
   }
 
-  const authUserId = authData.user.id;
+  verifiedTokens.set(token, { id: data.user.id, at: Date.now() });
+  if (verifiedTokens.size > 5_000) {
+    const now = Date.now();
+    for (const [k, v] of verifiedTokens) if (now - v.at >= TOKEN_TTL_MS) verifiedTokens.delete(k);
+  }
+  return data.user.id;
+}
+
+async function resolveUser(token: string): Promise<DbUser> {
+  const admin = supabaseAdmin();
+  const userId = await authUserId(token);
 
   // maybeSingle, so a genuine DB/permission failure is distinguishable
   // from "the row isn't there" instead of collapsing into one message.
   const { data: profile, error } = await admin
     .from('users')
     .select('*')
-    .eq('id', authUserId)
+    .eq('id', userId)
     .maybeSingle<DbUser>();
 
   if (error) {
-    console.error('[auth] profile lookup failed', { authUserId, error: error.message });
+    console.error('[auth] profile lookup failed', { userId, error: error.message });
     throw new ApiError(
       'INTERNAL_ERROR',
       'Could not read the user profile.',
-      { auth_user_id: authUserId, db_error: error.message },
+      { auth_user_id: userId, db_error: error.message },
     );
   }
 
@@ -71,7 +73,7 @@ async function resolveUser(token: string): Promise<DbUser> {
     throw new ApiError(
       'UNAUTHORIZED',
       'User profile not found. The auth user exists but has no row in public.users.',
-      { auth_user_id: authUserId },
+      { auth_user_id: userId },
     );
   }
 

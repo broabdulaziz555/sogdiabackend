@@ -32,7 +32,7 @@ export const POST = handle(async (req) => {
     const { data } = await admin
       .from('users')
       .select('*')
-      .ilike('email', body.email)
+      .ilike('email', body.email.replace(/[\\%_]/g, '\\$&')) // exact, case-insensitive: _ and % are not wildcards here
       .maybeSingle<DbUser>();
     recipient = data;
   }
