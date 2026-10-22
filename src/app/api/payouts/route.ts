@@ -100,7 +100,7 @@ export const POST = handle(async (req) => {
     user.id,
     'payout_requested',
     'Payout requested',
-    `Your payout request of $${split.net} (80% of $${split.gross}) is under review.`,
+    `Your payout request of $${split.net} (${split.split_pct}% of $${split.gross}) is under review.`,
     { transaction_id: data.id, account_id: account.id },
   );
 

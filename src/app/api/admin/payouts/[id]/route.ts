@@ -39,6 +39,29 @@ export const POST = handle(async (req: Request, ctx: { params: { id: string } })
   const nextStatus: TransactionStatus =
     body.action === 'approve' ? 'approved' : body.action === 'reject' ? 'rejected' : 'paid';
 
+  // pending -> approved | rejected | paid, approved -> rejected | paid. Anything else is a stale click.
+  const allowedFrom: Record<string, string[]> = {
+    approve: ['pending'],
+    reject: ['pending', 'approved'],
+    mark_paid: ['pending', 'approved'],
+  };
+  if (!allowedFrom[body.action].includes(tx.status)) {
+    throw new ApiError('VALIDATION_ERROR', `This payout is already ${tx.status}.`);
+  }
+
+  // Claim the transition first so two clicks / two admins cannot both debit the account.
+  const { data: claimed, error: claimError } = await admin
+    .from('transactions')
+    .update({ status: nextStatus })
+    .eq('id', tx.id)
+    .eq('status', tx.status)
+    .select('id')
+    .maybeSingle<{ id: string }>();
+  if (claimError) throw new ApiError('INTERNAL_ERROR', claimError.message);
+  if (!claimed) throw new ApiError('DUPLICATE', 'This payout was just updated by someone else. Refresh the list.');
+
+  const release = () => admin.from('transactions').update({ status: tx.status }).eq('id', tx.id);
+
   let certificateId: string | null = null;
 
   if (body.action === 'mark_paid' && tx.account_id) {
@@ -46,6 +69,11 @@ export const POST = handle(async (req: Request, ctx: { params: { id: string } })
     const gross = Number(tx.amount);
     const now = new Date();
     const nextPayout = new Date(now.getTime() + account.payout_cycle_days * 86_400_000);
+
+    if (Number(account.balance) < gross) {
+      await release();
+      throw new ApiError('VALIDATION_ERROR', 'Account balance is now below this payout. Reject it or adjust the account first.');
+    }
 
     const { error: accError } = await admin
       .from('accounts')
@@ -58,18 +86,26 @@ export const POST = handle(async (req: Request, ctx: { params: { id: string } })
       })
       .eq('id', account.id);
 
-    if (accError) throw new ApiError('INTERNAL_ERROR', accError.message);
+    if (accError) {
+      await release();
+      throw new ApiError('INTERNAL_ERROR', accError.message);
+    }
 
-    const certificate = await issueCertificate({
-      user_id: tx.user_id,
-      account_id: account.id,
-      type: 'payout',
-      amount: Number(tx.net_amount ?? tx.amount),
-      is_manual: false,
-      issued_by: staff.id,
-      metadata: { transaction_id: tx.id, gross, split_pct: Number(account.payout_split_pct) },
-    });
-    certificateId = certificate.id;
+    // The money has moved and the balance is debited; a certificate hiccup must not undo or hide that.
+    try {
+      const certificate = await issueCertificate({
+        user_id: tx.user_id,
+        account_id: account.id,
+        type: 'payout',
+        amount: Number(tx.net_amount ?? tx.amount),
+        is_manual: false,
+        issued_by: staff.id,
+        metadata: { transaction_id: tx.id, gross, split_pct: Number(account.payout_split_pct) },
+      });
+      certificateId = certificate.id;
+    } catch (err) {
+      console.error('[payout] certificate failed', tx.id, err);
+    }
   }
 
   const { data: updated, error: updateError } = await admin
