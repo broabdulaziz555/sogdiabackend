@@ -47,6 +47,7 @@ export const PATCH = handle(async (req: Request, ctx: { params: { code: string }
     ...(body.plans !== undefined ? { plans: body.plans } : {}),
     ...(body.expires_at !== undefined ? { expires_at: body.expires_at } : {}),
     ...(body.max_uses !== undefined ? { max_uses: body.max_uses } : {}),
+    ...(body.max_per_user !== undefined ? { max_per_user: body.max_per_user } : {}),
     ...(body.active !== undefined ? { active: body.active } : {}),
     ...(body.note !== undefined ? { note: body.note ?? undefined } : {}),
   });

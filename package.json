@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "node tests/margin-validation.test.mjs",
+    "test": "node tests/margin-validation.test.mjs && node tests/promo-limits.test.mjs",
     "lint": "next lint"
   },
   "dependencies": {

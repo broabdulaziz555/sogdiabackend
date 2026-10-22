@@ -18,8 +18,10 @@ export interface Promo {
   plans: 'all' | string[];
   /** ISO date (YYYY-MM-DD) or null for no expiry */
   expires_at: string | null;
-  /** 0 = unlimited */
+  /** Total redemptions allowed across ALL customers. 0 = unlimited. */
   max_uses: number;
+  /** Redemptions allowed per customer. 0 = unlimited. 1 = once each. */
+  max_per_user: number;
   active: boolean;
   note?: string;
 }
@@ -49,6 +51,7 @@ export const DEFAULT_SETTINGS: PlatformSettings = {
       plans: 'all',
       expires_at: null,
       max_uses: 0,
+      max_per_user: 1,
       active: true,
     },
   ],
@@ -65,12 +68,17 @@ export const DEFAULT_SETTINGS_RAW = `# SOGDIA platform settings
 #   min_invoice_usd          invoice floor after discounts
 #
 # Promos
-#   promo = CODE | 25% | plans:all | expires:2026-12-31 | max_uses:500 | active
+#   promo = CODE | 25% | plans:all | expires:2026-12-31 | max_uses:500 | max_per_user:1 | active
 #   promo = CODE | $50 | plans:one_step_100k,instant_100k | expires:never | max_uses:0 | inactive
-#   value   -> "25%" for percent off, "$50" for a flat USD discount
-#   plans   -> "all" or a comma-separated list of plan keys
-#   expires -> YYYY-MM-DD or "never"
-#   max_uses-> 0 means unlimited
+#   value       -> "25%" for percent off, "$50" for a flat USD discount
+#   plans       -> "all" or a comma-separated list of plan keys
+#   expires     -> YYYY-MM-DD or "never"
+#   max_uses    -> TOTAL redemptions across all customers. 0 = unlimited.
+#   max_per_user-> redemptions per customer. 0 = unlimited, 1 = once each.
+#
+#   A welcome code everyone may use once:  max_uses:0 | max_per_user:1
+#   First 100 signups, once each:          max_uses:100 | max_per_user:1
+#   A single one-off code for one person:  max_uses:1
 #
 # Only the single best discount applies — promo, referral and site-wide never stack.
 
@@ -79,7 +87,7 @@ referral_discount_pct   = 5
 default_discount_pct    = 0
 min_invoice_usd         = 1
 
-promo = WELCOME10 | 10% | plans:all | expires:never | max_uses:0 | active
+promo = WELCOME10 | 10% | plans:all | expires:never | max_uses:0 | max_per_user:1 | active
 `;
 
 export const SETTINGS_NUMERIC_KEYS = [

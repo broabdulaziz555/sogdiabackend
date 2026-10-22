@@ -61,6 +61,7 @@ function parsePromoLine(spec: string, line: number, issues: ParseIssue[]): Promo
     plans: 'all',
     expires_at: null,
     max_uses: 0,
+    max_per_user: 0,
     active: true,
   };
   let valueSeen = false;
@@ -139,6 +140,11 @@ function parsePromoLine(spec: string, line: number, issues: ParseIssue[]): Promo
       case 'limit':
         promo.max_uses = Number(value);
         break;
+      case 'max_per_user':
+      case 'per_user':
+      case 'once_per_user':
+        promo.max_per_user = Number(value);
+        break;
       case 'note':
       case 'label':
         promo.note = value;
@@ -162,6 +168,10 @@ function parsePromoLine(spec: string, line: number, issues: ParseIssue[]): Promo
   }
   if (!Number.isFinite(promo.max_uses) || promo.max_uses < 0) {
     issues.push({ line, message: `Promo ${code}: max_uses must be 0 or more.` });
+    return null;
+  }
+  if (!Number.isFinite(promo.max_per_user) || promo.max_per_user < 0) {
+    issues.push({ line, message: `Promo ${code}: max_per_user must be 0 or more.` });
     return null;
   }
 
@@ -290,6 +300,7 @@ function normalizePromo(input: Partial<Promo>): Promo {
     plans: input.plans === 'all' || input.plans === undefined ? 'all' : input.plans,
     expires_at: input.expires_at ?? null,
     max_uses: Number(input.max_uses ?? 0),
+    max_per_user: Number(input.max_per_user ?? 0),
     active: input.active !== false,
     ...(input.note ? { note: input.note } : {}),
   };
@@ -301,9 +312,9 @@ export function promoLine(promo: Promo): string {
   const plans = promo.plans === 'all' ? 'all' : promo.plans.join(',');
   return `promo = ${promo.code} | ${value} | plans:${plans} | expires:${
     promo.expires_at ?? 'never'
-  } | max_uses:${promo.max_uses} | ${promo.active ? 'active' : 'inactive'}${
-    promo.note ? ` | note:${promo.note}` : ''
-  }`;
+  } | max_uses:${promo.max_uses} | max_per_user:${promo.max_per_user} | ${
+    promo.active ? 'active' : 'inactive'
+  }${promo.note ? ` | note:${promo.note}` : ''}`;
 }
 
 /** Canonical line-format text for a settings object. */

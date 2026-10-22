@@ -55,6 +55,7 @@ export const POST = handle(async (req) => {
     plans: body.plans,
     expires_at: body.expires_at,
     max_uses: body.max_uses,
+    max_per_user: body.max_per_user,
     active: body.active,
     ...(body.note ? { note: body.note } : {}),
   };

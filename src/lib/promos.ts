@@ -29,7 +29,10 @@ export async function findPromo(code: string): Promise<Promo | null> {
   return settings.promos.find((p) => p.code === wanted) ?? null;
 }
 
-export function promoStatus(promo: Promo, uses: number): 'active' | 'inactive' | 'expired' | 'exhausted' {
+export function promoStatus(
+  promo: Promo,
+  uses: number,
+): 'active' | 'inactive' | 'expired' | 'exhausted' {
   if (!promo.active) return 'inactive';
   if (promo.expires_at && Date.parse(`${promo.expires_at}T23:59:59Z`) < Date.now()) {
     return 'expired';
@@ -50,15 +53,42 @@ export interface DiscountQuote {
   label: string | null;
 }
 
-/** How many times a promo has been redeemed on a confirmed purchase. */
+/**
+ * An open invoice counts against a limit for this long. NOWPayments
+ * invoices resolve or expire well inside this window, and the webhook
+ * marks dead ones `failed`, so a stale pending cannot block a code
+ * forever.
+ */
+const PENDING_HOLD_MS = 2 * 60 * 60 * 1000;
+
+/** Redemptions that count: paid, plus invoices still open. */
+function countsAsRedemption(query: ReturnType<ReturnType<typeof supabaseAdmin>['from']>) {
+  const since = new Date(Date.now() - PENDING_HOLD_MS).toISOString();
+  return (query as any).or(`status.eq.paid,and(status.eq.pending,created_at.gte.${since})`);
+}
+
+/** How many times a promo has been redeemed, across all customers. */
 export async function promoUses(code: string): Promise<number> {
-  const { count } = await supabaseAdmin()
+  const base = supabaseAdmin()
     .from('transactions')
     .select('id', { count: 'exact', head: true })
     .eq('type', 'purchase')
-    .eq('status', 'paid')
     .eq('metadata->>promo_code', code.toUpperCase());
 
+  const { count } = await countsAsRedemption(base);
+  return count ?? 0;
+}
+
+/** How many times ONE customer has redeemed a promo. */
+export async function promoUsesByUser(code: string, userId: string): Promise<number> {
+  const base = supabaseAdmin()
+    .from('transactions')
+    .select('id', { count: 'exact', head: true })
+    .eq('type', 'purchase')
+    .eq('user_id', userId)
+    .eq('metadata->>promo_code', code.toUpperCase());
+
+  const { count } = await countsAsRedemption(base);
   return count ?? 0;
 }
 
@@ -67,42 +97,72 @@ export type PromoRejection =
   | 'INACTIVE'
   | 'EXPIRED'
   | 'PLAN_NOT_ELIGIBLE'
-  | 'LIMIT_REACHED';
+  | 'LIMIT_REACHED'
+  | 'USER_LIMIT_REACHED';
 
 export interface PromoCheck {
   ok: boolean;
   promo: Promo | null;
   reason: PromoRejection | null;
   uses: number;
+  user_uses: number;
 }
 
-/** Validate a code against a plan without charging anything. */
-export async function checkPromo(code: string, planKey: string): Promise<PromoCheck> {
+/**
+ * Validate a code against a plan without charging anything.
+ *
+ * `userId` is needed to enforce `max_per_user`. Omit it only where no
+ * customer is in scope (an admin listing, say) — the per-user cap is
+ * then not evaluated.
+ */
+export async function checkPromo(
+  code: string,
+  planKey: string,
+  userId?: string,
+): Promise<PromoCheck> {
   const { settings } = await getSettings();
   const wanted = code.trim().toUpperCase();
   const promo = settings.promos.find((p) => p.code === wanted) ?? null;
 
-  if (!promo) return { ok: false, promo: null, reason: 'UNKNOWN_CODE', uses: 0 };
-  if (!promo.active) return { ok: false, promo, reason: 'INACTIVE', uses: 0 };
+  const miss = (reason: PromoRejection): PromoCheck => ({
+    ok: false,
+    promo,
+    reason,
+    uses: 0,
+    user_uses: 0,
+  });
+
+  if (!promo) return { ...miss('UNKNOWN_CODE'), promo: null };
+  if (!promo.active) return miss('INACTIVE');
 
   if (promo.expires_at) {
     // Expiry is end-of-day UTC on the stated date.
     const expiresAt = Date.parse(`${promo.expires_at}T23:59:59Z`);
     if (Number.isFinite(expiresAt) && expiresAt < Date.now()) {
-      return { ok: false, promo, reason: 'EXPIRED', uses: 0 };
+      return miss('EXPIRED');
     }
   }
 
   if (promo.plans !== 'all' && !promo.plans.includes(planKey)) {
-    return { ok: false, promo, reason: 'PLAN_NOT_ELIGIBLE', uses: 0 };
+    return miss('PLAN_NOT_ELIGIBLE');
+  }
+
+  // Per-customer cap first: "you have already used this" is a more
+  // useful message than "this code is exhausted".
+  let userUses = 0;
+  if (promo.max_per_user > 0 && userId) {
+    userUses = await promoUsesByUser(promo.code, userId);
+    if (userUses >= promo.max_per_user) {
+      return { ok: false, promo, reason: 'USER_LIMIT_REACHED', uses: 0, user_uses: userUses };
+    }
   }
 
   const uses = promo.max_uses > 0 ? await promoUses(promo.code) : 0;
   if (promo.max_uses > 0 && uses >= promo.max_uses) {
-    return { ok: false, promo, reason: 'LIMIT_REACHED', uses };
+    return { ok: false, promo, reason: 'LIMIT_REACHED', uses, user_uses: userUses };
   }
 
-  return { ok: true, promo, reason: null, uses };
+  return { ok: true, promo, reason: null, uses, user_uses: userUses };
 }
 
 export function promoRejectionMessage(reason: PromoRejection): string {
@@ -117,6 +177,8 @@ export function promoRejectionMessage(reason: PromoRejection): string {
       return 'That promo code does not apply to this plan.';
     case 'LIMIT_REACHED':
       return 'That promo code has reached its usage limit.';
+    case 'USER_LIMIT_REACHED':
+      return 'You have already used that promo code.';
   }
 }
 
@@ -144,7 +206,7 @@ export async function quoteCheckout(
   ];
 
   if (promoCode) {
-    const check = await checkPromo(promoCode, plan.key);
+    const check = await checkPromo(promoCode, plan.key, user.id);
     if (!check.ok || !check.promo) {
       throw new ApiError(
         'VALIDATION_ERROR',

@@ -26,7 +26,7 @@ export const GET = handle(async (req) => {
     return ok({ valid: true, promo_code: null, reason: null, quote });
   }
 
-  const check = await checkPromo(code, plan.key);
+  const check = await checkPromo(code, plan.key, user.id);
   if (!check.ok) {
     return ok({
       valid: false,

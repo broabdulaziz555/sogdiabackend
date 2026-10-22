@@ -298,7 +298,9 @@ Price preview for the checkout screen. Creates nothing.
   }
 }
 ```
-`reason` ∈ `UNKNOWN_CODE | INACTIVE | EXPIRED | PLAN_NOT_ELIGIBLE | LIMIT_REACHED`.
+`reason` ∈ `UNKNOWN_CODE | INACTIVE | EXPIRED | PLAN_NOT_ELIGIBLE | LIMIT_REACHED | USER_LIMIT_REACHED`.
+`LIMIT_REACHED` is the global cap; `USER_LIMIT_REACHED` means this customer has already redeemed it.
+A redemption is counted from a `paid` purchase, or a `pending` one created in the last 2 hours (so an open invoice cannot be double-spent, and a stale one releases the hold).
 `source` ∈ `promo | referral | site_wide | none`.
 
 ---
@@ -993,7 +995,8 @@ promo = VIP100    | $100 | plans:one_step_100k,instant_100k | expires:never | ma
 | `$50` or `fixed:50` | flat USD off (never below the invoice floor) |
 | `plans:all` / `plans:a,b` | eligible plan keys |
 | `expires:YYYY-MM-DD` / `expires:never` | end-of-day UTC on that date |
-| `max_uses:N` | `0` = unlimited; counted from confirmed purchases |
+| `max_uses:N` | **total** redemptions across all customers; `0` = unlimited |
+| `max_per_user:N` | redemptions **per customer**; `0` = unlimited, `1` = once each |
 | `active` / `inactive` | on/off without deleting the line |
 | `note:text` | label shown on the pricing page |
 
