@@ -51,12 +51,13 @@ export const POST = handle(async (req) => {
   );
 
   const result = await evaluateAccount(order.account_id);
-  await snapshotEquity(
+  // Telemetry only: don't make the trader wait for the equity-curve insert.
+  void snapshotEquity(
     result.account.id,
     Number(result.account.equity),
     Number(result.account.balance),
     'trade_close',
-  );
+  ).catch(() => undefined);
 
   return ok({
     order: {

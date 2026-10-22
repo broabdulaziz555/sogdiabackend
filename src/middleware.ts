@@ -13,6 +13,7 @@ export function middleware(request: NextRequest) {
           'Access-Control-Allow-Origin': '*', // Allows your frontend to connect
           'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-api-key, Idempotency-Key',
+          'Access-Control-Max-Age': '86400', // browsers reuse the preflight answer instead of asking before every POST
         },
       })
     }

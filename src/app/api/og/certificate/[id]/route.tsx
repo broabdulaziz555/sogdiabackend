@@ -67,6 +67,12 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
             }}>S</div>
             <div style={{ fontSize: 28, letterSpacing: 8, fontWeight: 700 }}>SOGDIA</div>
           </div>
+          <div style={{
+            display: 'flex', fontSize: 16, letterSpacing: 4, color: '#7D8B99', marginTop: 12,
+            fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+          }}>
+            SOGDIA.SITE · INSTITUTIONAL CRYPTO PROP FIRM
+          </div>
 
           <div style={{ fontSize: 26, letterSpacing: 6, color: BRAND, marginTop: 34 }}>{title}</div>
           <div style={{ fontSize: 20, color: '#7D8B99', marginTop: 10 }}>This certifies that</div>

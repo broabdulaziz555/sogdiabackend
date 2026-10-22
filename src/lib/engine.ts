@@ -173,15 +173,20 @@ export async function forceCloseAll(accountId: string, reason: string): Promise<
   return count;
 }
 
-async function persistEquity(accountId: string, equity: number): Promise<DbAccount> {
-  const { data, error } = await supabaseAdmin()
+/**
+ * Stores the latest equity figure. The write is not awaited: every caller already holds the freshly computed
+ * number (and returns it to the client), so the poll no longer waits on a database round trip.
+ */
+function persistEquity(account: DbAccount, equity: number): DbAccount {
+  void supabaseAdmin()
     .from('accounts')
     .update({ equity })
-    .eq('id', accountId)
-    .select('*')
-    .single<DbAccount>();
-  if (error) throw new ApiError('INTERNAL_ERROR', error.message);
-  return data;
+    .eq('id', account.id)
+    .then(
+      ({ error }) => { if (error) console.error('[engine] equity persist failed', error.message); },
+      (err: unknown) => console.error('[engine] equity persist failed', err),
+    );
+  return { ...account, equity };
 }
 
 export interface EvaluationResult {
@@ -288,6 +293,6 @@ export async function evaluateAccount(input: DbAccount | string): Promise<Evalua
   }
 
   // 5 — persist the equity snapshot
-  account = await persistEquity(account.id, metrics.equity);
+  account = persistEquity(account, metrics.equity);
   return { account, positions, metrics, risk: { ...risk, status: account.status }, liquidated };
 }

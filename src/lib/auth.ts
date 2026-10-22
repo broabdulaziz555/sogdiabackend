@@ -22,6 +22,25 @@ function bearer(req: Request): string {
  */
 export async function requireUser(req: Request): Promise<DbUser> {
   const token = bearer(req);
+
+  // A verified session is reused for a few seconds: the terminal fires a request every 2-4 s and each
+  // verification is two sequential Supabase round trips. Role / profile edits show up within the TTL.
+  const hit = userCache.get(token);
+  if (hit && Date.now() - hit.at < USER_TTL_MS) return hit.user;
+
+  const user = await resolveUser(token);
+  userCache.set(token, { user, at: Date.now() });
+  if (userCache.size > 5_000) {
+    const now = Date.now();
+    for (const [k, v] of userCache) if (now - v.at >= USER_TTL_MS) userCache.delete(k);
+  }
+  return user;
+}
+
+const USER_TTL_MS = 30_000;
+const userCache = new Map<string, { user: DbUser; at: number }>();
+
+async function resolveUser(token: string): Promise<DbUser> {
   const admin = supabaseAdmin();
 
   const { data: authData, error: authError } = await admin.auth.getUser(token);

@@ -111,6 +111,12 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
             </div>
           ))}
         </div>
+
+        <div style={{
+          display: 'flex', marginTop: 32, fontSize: 20, letterSpacing: 3, color: '#6E7D8C',
+        }}>
+          SOGDIA.SITE · INSTITUTIONAL CRYPTO PROP FIRM
+        </div>
       </div>
     ),
     {

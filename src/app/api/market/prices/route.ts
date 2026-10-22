@@ -14,7 +14,7 @@ export const GET = handle(async (req) => {
     ? raw.split(',').map((s) => s.trim()).filter(Boolean)
     : [...TOP_50_USDT_PAIRS];
 
-  const prices = await getPrices(symbols);
+  const prices = await getPrices(symbols, false);
 
   return ok({
     spread_bps: SPREAD_BPS,

@@ -1,15 +1,22 @@
 import { ApiError } from '@/lib/http';
 import { isTradableSymbol, TOP_50_USDT_PAIRS } from '@/config/symbols';
 
-const BASE_URL = process.env.BINANCE_API_URL ?? 'https://api.binance.com';
+const PRIMARY = (process.env.BINANCE_API_URL ?? 'https://api.binance.com').replace(/\/$/, '');
+/**
+ * Market-data mirror. api.binance.com is geo-blocked (HTTP 451) from some regions and can hang on others;
+ * the mirror serves the same public endpoints. Both hosts are asked at once and the first good answer wins.
+ */
+const HOSTS = [PRIMARY, 'https://data-api.binance.vision'].filter((v, i, a) => a.indexOf(v) === i);
 
-/** Tiny in-process cache so a burst of position polls hits Binance once. */
+/** Tiny in-process cache so a burst of polls / orders hits Binance once. */
 const TTL_MS = 1_500;
+/** If every upstream host fails, a price this young may still be used instead of rejecting the request. */
+const STALE_OK_MS = 10_000;
 const cache = new Map<string, { price: number; at: number }>();
 
-function readCache(symbol: string): number | null {
+function readCache(symbol: string, maxAgeMs = TTL_MS): number | null {
   const hit = cache.get(symbol);
-  if (hit && Date.now() - hit.at < TTL_MS) return hit.price;
+  if (hit && Date.now() - hit.at < maxAgeMs) return hit.price;
   return null;
 }
 
@@ -28,52 +35,84 @@ export function assertTradable(symbol: string): string {
   return upper;
 }
 
-async function binanceFetch(path: string): Promise<unknown> {
-  let res: Response;
-  try {
-    res = await fetch(`${BASE_URL}${path}`, {
-      cache: 'no-store',
-      headers: { accept: 'application/json' },
-      // Binance is fast; fail loudly rather than hanging a trade request.
-      signal: AbortSignal.timeout(6_000),
-    });
-  } catch {
-    throw new ApiError('UPSTREAM_ERROR', 'Could not reach the price feed.');
-  }
-  if (!res.ok) {
-    throw new ApiError('UPSTREAM_ERROR', `Price feed responded ${res.status}.`);
-  }
+/** Identical requests made while one is in flight share the same upstream call. */
+const inflight = new Map<string, Promise<unknown>>();
+
+async function fetchHost(host: string, path: string, signal: AbortSignal): Promise<unknown> {
+  const res = await fetch(`${host}${path}`, {
+    cache: 'no-store',
+    headers: { accept: 'application/json' },
+    signal,
+  });
+  if (!res.ok) throw new Error(`Price feed responded ${res.status}.`);
   return res.json();
+}
+
+async function binanceFetch(path: string): Promise<unknown> {
+  const pending = inflight.get(path);
+  if (pending) return pending;
+
+  const run = (async () => {
+    const ctrls = HOSTS.map(() => new AbortController());
+    const timers = ctrls.map((c) => setTimeout(() => c.abort(), 4_000));
+    try {
+      return await Promise.any(
+        HOSTS.map(async (host, i) => {
+          const body = await fetchHost(host, path, ctrls[i].signal);
+          ctrls.forEach((c, j) => { if (j !== i) c.abort(); }); // winner found: stop the others
+          return body;
+        }),
+      );
+    } catch {
+      throw new ApiError('UPSTREAM_ERROR', 'Could not reach the price feed.');
+    } finally {
+      timers.forEach(clearTimeout);
+    }
+  })();
+
+  inflight.set(path, run);
+  try {
+    return await run;
+  } finally {
+    inflight.delete(path);
+  }
+}
+
+type TickerRow = { symbol: string; price: string };
+
+function absorb(rows: unknown, wanted: Set<string>, out: Record<string, number>): void {
+  if (!Array.isArray(rows)) return;
+  for (const row of rows as TickerRow[]) {
+    if (!wanted.has(row.symbol)) continue;
+    const price = Number(row.price);
+    if (Number.isFinite(price) && price > 0) {
+      out[row.symbol] = price;
+      writeCache(row.symbol, price);
+    }
+  }
 }
 
 /** Live mid price for one whitelisted symbol. */
 export async function getPrice(symbol: string): Promise<number> {
   const sym = assertTradable(symbol);
-
-  const cached = readCache(sym);
-  if (cached !== null) return cached;
-
-  const json = (await binanceFetch(`/api/v3/ticker/price?symbol=${sym}`)) as {
-    symbol?: string;
-    price?: string;
-  };
-
-  const price = Number(json?.price);
-  if (!Number.isFinite(price) || price <= 0) {
-    throw new ApiError('UPSTREAM_ERROR', `No price available for ${sym}.`);
-  }
-
-  writeCache(sym, price);
-  return price;
+  const prices = await getPrices([sym]);
+  return prices[sym];
 }
 
-/** Live mid prices for many symbols in a single upstream call. */
+/**
+ * Live mid prices for many symbols in a single upstream call.
+ *
+ * strict (default): every requested symbol must resolve, otherwise UPSTREAM_ERROR.
+ * non-strict:       symbols the feed does not list are simply left out — used by the public
+ *                   price board so one delisted pair can never blank the whole terminal.
+ */
 export async function getPrices(
   symbols: string[] = [...TOP_50_USDT_PAIRS],
+  strict = true,
 ): Promise<Record<string, number>> {
   const wanted = Array.from(new Set(symbols.map(assertTradable)));
   const out: Record<string, number> = {};
-  const missing: string[] = [];
+  let missing: string[] = [];
 
   for (const sym of wanted) {
     const cached = readCache(sym);
@@ -82,24 +121,28 @@ export async function getPrices(
   }
   if (missing.length === 0) return out;
 
-  const query = encodeURIComponent(JSON.stringify(missing));
-  const json = (await binanceFetch(`/api/v3/ticker/price?symbols=${query}`)) as Array<{
-    symbol: string;
-    price: string;
-  }>;
-
-  for (const row of json ?? []) {
-    const price = Number(row.price);
-    if (Number.isFinite(price) && price > 0) {
-      out[row.symbol] = price;
-      writeCache(row.symbol, price);
+  const want = new Set(missing);
+  try {
+    try {
+      const query = encodeURIComponent(JSON.stringify(missing));
+      absorb(await binanceFetch(`/api/v3/ticker/price?symbols=${query}`), want, out);
+    } catch {
+      // One unknown / delisted symbol makes Binance reject the whole symbols= call; the full listing has no such failure mode.
+      absorb(await binanceFetch('/api/v3/ticker/price'), want, out);
     }
+  } catch {
+    /* every host failed — fall through to the short stale window below */
   }
 
+  missing = missing.filter((s) => out[s] === undefined);
   for (const sym of missing) {
-    if (out[sym] === undefined) {
-      throw new ApiError('UPSTREAM_ERROR', `No price available for ${sym}.`);
-    }
+    const stale = readCache(sym, STALE_OK_MS);
+    if (stale !== null) out[sym] = stale;
+  }
+
+  missing = missing.filter((s) => out[s] === undefined);
+  if (strict && missing.length > 0) {
+    throw new ApiError('UPSTREAM_ERROR', `No price available for ${missing.join(', ')}.`);
   }
   return out;
 }

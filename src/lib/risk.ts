@@ -87,8 +87,15 @@ export function computeMetrics(account: DbAccount, positions: Position[]): Accou
   };
 }
 
+/**
+ * Simulation mode: drawdown is still measured and shown, but it no longer fails the account or flattens its
+ * positions. Set ENFORCE_DRAWDOWN_BREACH=1 in the environment to bring the hard breach back.
+ */
+const ENFORCE_BREACH = process.env.ENFORCE_DRAWDOWN_BREACH === '1';
+
 /** Which rule, if any, the account has just violated. Max DD is checked first. */
 export function checkBreach(metrics: AccountMetrics): BreachReason {
+  if (!ENFORCE_BREACH) return null;
   if (metrics.equity <= metrics.max_dd_limit) return 'MAX_DRAWDOWN';
   if (metrics.equity <= metrics.daily_dd_limit) return 'DAILY_DRAWDOWN';
   return null;
