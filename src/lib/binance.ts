@@ -44,7 +44,7 @@ async function fetchHost(host: string, path: string, signal: AbortSignal): Promi
     headers: { accept: 'application/json' },
     signal,
   });
-  if (!res.ok) throw new Error(`Price feed responded ${res.status}.`);
+  if (!res.ok) throw Object.assign(new Error(`Price feed responded ${res.status}.`), { status: res.status });
   return res.json();
 }
 
@@ -63,8 +63,11 @@ async function binanceFetch(path: string): Promise<unknown> {
           return body;
         }),
       );
-    } catch {
-      throw new ApiError('UPSTREAM_ERROR', 'Could not reach the price feed.');
+    } catch (err) {
+      // Every host answered 400: the request itself was refused (e.g. an unknown symbol), the feed is up.
+      const errors = err instanceof AggregateError ? err.errors : [err];
+      const rejected = errors.length > 0 && errors.every((e) => (e as { status?: number })?.status === 400);
+      throw new ApiError('UPSTREAM_ERROR', 'Could not reach the price feed.', rejected ? { rejected: true } : null);
     } finally {
       timers.forEach(clearTimeout);
     }
@@ -126,8 +129,10 @@ export async function getPrices(
     try {
       const query = encodeURIComponent(JSON.stringify(missing));
       absorb(await binanceFetch(`/api/v3/ticker/price?symbols=${query}`), want, out);
-    } catch {
+    } catch (err) {
       // One unknown / delisted symbol makes Binance reject the whole symbols= call; the full listing has no such failure mode.
+      // Only retried when the feed answered (400) — if it is unreachable a second attempt would just double the wait.
+      if (!(err instanceof ApiError && (err.details as { rejected?: boolean } | null)?.rejected)) throw err;
       absorb(await binanceFetch('/api/v3/ticker/price'), want, out);
     }
   } catch {
