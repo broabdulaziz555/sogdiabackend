@@ -12,6 +12,7 @@ const db: Record<string, any[]> = {
   pending_orders: [] as any[],
 };
 let pendingEnabled = true;
+let binanceDown = false;
 let prices: Record<string, number> = { BTCUSDT: 81500, PEPEUSDT: 0.0000044, ETHUSDT: 3200 };
 let nid = 0;
 
@@ -58,6 +59,7 @@ const j = (b: any, s = 200, h: any = {}) => new Response(JSON.stringify(b), { st
     return j(hit, 200, { 'content-range': `0-${Math.max(hit.length - 1, 0)}/${hit.length}` });
   }
   if (url.host.includes('binance')) {
+    if (binanceDown) return j({ msg: 'down' }, 503);
     const syms = url.searchParams.get('symbols');
     const list = syms ? JSON.parse(syms) : Object.keys(prices);
     return j(list.map((s: string) => ({ symbol: s, price: String(prices[s]) })));
@@ -156,6 +158,19 @@ const check = (name: string, cond: boolean, extra?: any) => { console.log(cond ?
   check('poll survives missing table', Array.isArray(l.positions) && Array.isArray(l.pending) && l.pending.length === 0);
   const un = await call(pend, 'POST', '/api/trade/pending', { account_id: ACC, symbol: 'BTCUSDT', side: 'long', kind: 'limit', trigger_price: 1, leverage: 3, margin: 10 });
   check('create reports FEATURE_UNAVAILABLE', !un.ok && un.error.code === 'FEATURE_UNAVAILABLE', un);
+
+  // 9b a price that cannot be had must never hide a position or fail the poll
+  const before = (await list()).positions.length;
+  const stray = (id: string, symbol: string) => ({ id, account_id: ACC, user_id: USER, status: 'open', symbol, side: 'long', margin: 50, leverage: 2, position_size: 100, quantity: 1, entry_price: 100, mark_price_at_open: 100, liquidation_price: 50, take_profit: null, stop_loss: 100.5, created_at: new Date().toISOString() });
+  db.orders.push(stray('aaaaaaaa-1111-4111-8111-111111111111', 'XRPUSDT'), stray('bbbbbbbb-1111-4111-8111-111111111111', 'NOSUCHUSDT'));
+  binanceDown = true;
+  const down = await call(pos, 'GET', `/api/trade/positions?account_id=${ACC}`);
+  binanceDown = false;
+  const fb = down.ok ? down.data.positions.filter((x: any) => x.id.endsWith('1111-4111-8111-111111111111')) : [];
+  check('prices unavailable: poll still answers and lists every position', down.ok && down.data.positions.length === before + 2 && down.data.debug.db_open_orders === before + 2, down.ok ? down.data.debug : down);
+  check('fallback positions are priced at their open price, as numbers', fb.length === 2 && fb.every((x: any) => x.price_source === 'fallback' && x.mark_price === 100 && typeof x.entry_price === 'number'), fb);
+  check('a stand-in price never triggers a stop-loss (SL above the stand-in would fire on a live price)', db.orders.filter((o) => o.id.endsWith('1111-4111-8111-111111111111') && o.status === 'open').length === 2);
+  db.orders = db.orders.filter((o) => !o.id.endsWith('1111-4111-8111-111111111111'));
 
   // 10 cron tick
   db.orders = db.orders.filter((o) => o.account_id !== 'other');

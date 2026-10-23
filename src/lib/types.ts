@@ -114,6 +114,11 @@ export interface Position extends DbOrder {
   mark_price: number;
   unrealized_pnl: number;
   unrealized_pnl_pct: number;
+  /**
+   * 'fallback' when no live Binance price could be had and the open price stands in for it. Such a position is still
+   * listed, but the risk sweep never closes anything on a stand-in price.
+   */
+  price_source?: 'live' | 'fallback';
 }
 
 export interface AccountMetrics {

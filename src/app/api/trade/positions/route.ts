@@ -26,9 +26,18 @@ export const GET = handle(async (req) => {
     listPending(account_id),
   ]);
   const { result, pending: pendingAfter } = await runCycle(user, account, { orders, pending });
+  const positions = result.positions;
+
+  // Orders come from supabaseAdmin() (service role, RLS does not apply). `db_open_orders` is what the database listed for
+  // this account before the cycle ran; `returned` is what is sent back. If they differ, the cycle closed something.
+  console.log('FETCHED POSITIONS:', positions);
+  if (orders.length !== positions.length) {
+    console.warn('[positions] database listed', orders.length, 'open order(s) but the response carries', positions.length, { account_id, liquidated: result.liquidated.length, status: result.risk.status });
+  }
 
   return ok({
-    positions: result.positions,
+    positions,
+    debug: { account_id, db_open_orders: orders.length, returned: positions.length, closed_by_cycle: result.liquidated.length, account_status: result.risk.status },
     pending: pendingAfter,
     liquidated: result.liquidated,
     account: serializeAccount(result.account),

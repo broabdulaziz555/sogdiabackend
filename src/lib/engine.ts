@@ -41,12 +41,29 @@ export async function getOpenOrders(accountId: string): Promise<DbOrder[]> {
   return (data ?? []) as DbOrder[];
 }
 
-/** Attach live Binance marks to a set of open orders. */
+/**
+ * Attach live Binance marks to a set of open orders.
+ *
+ * A price that cannot be had never hides a position and never fails the request: that position is listed at its
+ * open price (price_source 'fallback') and the problem is logged. The risk sweep skips fallback positions, so a stand-in
+ * price can never liquidate or stop anyone out.
+ */
 export async function buildPositions(orders: DbOrder[]): Promise<Position[]> {
   if (orders.length === 0) return [];
   const symbols = Array.from(new Set(orders.map((o) => o.symbol)));
-  const prices = await getPrices(symbols);
-  return orders.map((o) => toPosition(o, prices[o.symbol]));
+  let prices: Record<string, number> = {};
+  try {
+    prices = await getPrices(symbols, false); // lenient: symbols the feed cannot give are left out instead of failing the call
+  } catch (err) {
+    console.error('[engine] live prices unavailable, listing positions at their open price', { symbols, error: err instanceof Error ? err.message : String(err) });
+  }
+  return orders.map((o) => {
+    const live = prices[o.symbol];
+    if (Number.isFinite(live) && live > 0) return { ...toPosition(o, live), price_source: 'live' as const };
+    const standIn = Number(o.mark_price_at_open) > 0 ? Number(o.mark_price_at_open) : Number(o.entry_price);
+    console.warn('[engine] no live price, using the open price', { order_id: o.id, symbol: o.symbol, stand_in: standIn });
+    return { ...toPosition(o, standIn), price_source: 'fallback' as const };
+  });
 }
 
 /** Atomic settle: writes the order and credits PnL to the account balance. */
@@ -119,6 +136,7 @@ export async function sweepLiquidations(positions: Position[]): Promise<AutoClos
   const closed: AutoClose[] = [];
 
   for (const p of positions) {
+    if (p.price_source === 'fallback') continue; // never settle a trade on a stand-in price
     const trigger = resolveAutoClose(p);
     if (!trigger) continue;
 
