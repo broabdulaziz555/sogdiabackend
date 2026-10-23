@@ -8,6 +8,15 @@ import { computeMetrics, isTradable } from '@/lib/risk';
 import { finishedSince, isAccountBusy, withAccountLock } from '@/lib/accountLock';
 import type { DbAccount, DbOrder, DbUser, OrderSide, Position } from '@/lib/types';
 
+/** No database call on the open path may take longer than this. */
+export const OPEN_DEADLINE_MS = 5_000;
+
+/** A call that hit its deadline: whether a write landed is unknown, which is not the same as a refusal. */
+function timedOut(message: string | undefined): boolean {
+  return !!message && /abort|timed? ?out/i.test(message);
+}
+const UNKNOWN_OUTCOME = 'The database did not answer in time. The order may or may not have been stored; check your positions.';
+
 export interface OpenParams {
   user: Pick<DbUser, 'id' | 'role'>;
   accountId: string;
@@ -50,12 +59,13 @@ export interface OpenReads {
  * and the price all travel in parallel. (A failed read stays a rejected promise until executeOpen awaits it.)
  */
 export function prefetchOpen(p: { accountId: string; symbol: string; orderId?: string }): OpenReads {
+  const signal = AbortSignal.timeout(OPEN_DEADLINE_MS);
   const reads: OpenReads = {
     startedAt: Date.now(),
-    account: getAccount(p.accountId),
-    orders: getOpenOrders(p.accountId),
-    mid: getPrice(p.symbol),
-    existing: p.orderId ? findOrder(p.orderId) : Promise.resolve(null),
+    account: getAccount(p.accountId, signal),
+    orders: getOpenOrders(p.accountId, signal),
+    mid: getPrice(p.symbol), // has its own 4 s deadline per host
+    existing: p.orderId ? findOrder(p.orderId, signal) : Promise.resolve(null),
   };
   for (const r of Object.values(reads)) if (r instanceof Promise) r.catch(() => undefined); // surfaced when awaited, never "unhandled"
   return reads;
@@ -97,7 +107,7 @@ export async function executeOpen(p: OpenParams): Promise<OpenResult> {
     const [account, openOrders, mid, existing] = await Promise.all(
       current
         ? [reads.account, reads.orders, reads.mid, reads.existing]
-        : [getAccount(accountId), getOpenOrders(accountId), reads.mid, orderId ? findOrder(orderId) : Promise.resolve(null)],
+        : (() => { const sig = AbortSignal.timeout(OPEN_DEADLINE_MS); return [getAccount(accountId, sig), getOpenOrders(accountId, sig), reads.mid, orderId ? findOrder(orderId, sig) : Promise.resolve(null)]; })(),
     ) as [DbAccount, DbOrder[], number, DbOrder | null];
 
     if (existing) return sameOwner(existing, user, accountId) ? replay(existing) : conflict();
@@ -148,6 +158,7 @@ export async function executeOpen(p: OpenParams): Promise<OpenResult> {
         stop_loss: p.stopLoss ?? null,
         status: 'open',
       })
+      .abortSignal(AbortSignal.timeout(OPEN_DEADLINE_MS))
       .select('*')
       .single<DbOrder>();
 
@@ -158,6 +169,7 @@ export async function executeOpen(p: OpenParams): Promise<OpenResult> {
         const again = await findOrder(orderId);
         if (again) return sameOwner(again, user, accountId) ? replay(again) : conflict();
       }
+      if (timedOut(ins.error?.message)) throw new ApiError('UPSTREAM_ERROR', UNKNOWN_OUTCOME);
       throw new ApiError('INTERNAL_ERROR', ins.error?.message ?? 'Order was not stored.');
     }
 
@@ -167,9 +179,10 @@ export async function executeOpen(p: OpenParams): Promise<OpenResult> {
   });
 }
 
-async function findOrder(id: string): Promise<DbOrder | null> {
-  const { data, error } = await supabaseAdmin().from('orders').select('*').eq('id', id).maybeSingle<DbOrder>();
-  if (error) throw new ApiError('INTERNAL_ERROR', error.message);
+async function findOrder(id: string, signal?: AbortSignal): Promise<DbOrder | null> {
+  const q = supabaseAdmin().from('orders').select('*').eq('id', id);
+  const { data, error } = await (signal ? q.abortSignal(signal) : q).maybeSingle<DbOrder>();
+  if (error) throw new ApiError(timedOut(error.message) ? 'UPSTREAM_ERROR' : 'INTERNAL_ERROR', timedOut(error.message) ? UNKNOWN_OUTCOME : error.message);
   return data;
 }
 

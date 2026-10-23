@@ -13,6 +13,7 @@ const db: Record<string, any[]> = {
 };
 let pendingEnabled = true;
 let binanceDown = false;
+let hangOrderInsert = false;
 let prices: Record<string, number> = { BTCUSDT: 81500, PEPEUSDT: 0.0000044, ETHUSDT: 3200 };
 let nid = 0;
 
@@ -33,6 +34,7 @@ const j = (b: any, s = 200, h: any = {}) => new Response(JSON.stringify(b), { st
   const accept = new Headers(init.headers).get('accept') ?? '';
   if (url.host === 'sb.local') {
     if (url.pathname.startsWith('/auth/v1/user')) return j({ id: USER, aud: 'authenticated' });
+    if (url.pathname.startsWith('/auth/v1/token')) { const b = JSON.parse(init.body); return b.password === 'pw' ? j({ access_token: 'a', refresh_token: 'r', expires_in: 3600, expires_at: 1, token_type: 'bearer', user: { id: USER, email: 't@t' } }) : j({ error: 'invalid_grant', error_description: 'Invalid login credentials' }, 400); }
     if (url.pathname.startsWith('/rest/v1/rpc/close_position')) {
       const a = JSON.parse(init.body);
       const o = db.orders.find((x) => x.id === a.p_order_id && x.status === 'open');
@@ -44,6 +46,7 @@ const j = (b: any, s = 200, h: any = {}) => new Response(JSON.stringify(b), { st
     const table = url.pathname.split('/').pop()!;
     if (table === 'pending_orders' && !pendingEnabled) return j({ code: 'PGRST205', message: "Could not find the table 'public.pending_orders' in the schema cache" }, 404);
     const rows = db[table] ?? [];
+    if (method === 'POST' && table === 'orders' && hangOrderInsert) await new Promise((_, rej) => init.signal?.addEventListener('abort', () => rej(Object.assign(new Error('The operation was aborted'), { name: 'AbortError' }))));
     if (method === 'POST') {
       const b = JSON.parse(init.body); const arr = Array.isArray(b) ? b : [b];
       if (arr.some((r) => r.id && rows.some((x) => x.id === r.id))) return j({ code: '23505', message: 'duplicate key' }, 409);
@@ -188,6 +191,31 @@ const check = (name: string, cond: boolean, extra?: any) => { console.log(cond ?
   check('open succeeded and did not sweep (doomed position still open right after)', oo.ok && db.orders.find((o) => o.id === doomed.id)!.status === 'open', db.orders.find((o) => o.id === doomed.id)?.status);
   await list();
   check('the next positions poll liquidates it', db.orders.find((o) => o.id === doomed.id)!.status !== 'open', db.orders.find((o) => o.id === doomed.id)?.status);
+
+  // 9e auth: the profile is read while the token is verified; the early read counts only for the verified user
+  const jwt = (sub: string) => `h.${Buffer.from(JSON.stringify({ sub })).toString('base64url')}.s`;
+  const withToken = async (tok: string) => { const r = await pos.GET(new Request(`http://x/api/trade/positions?account_id=${ACC}`, { headers: { authorization: `Bearer ${tok}` } }), { params: {} }); return r.json(); };
+  const a1 = await withToken(jwt(USER));
+  const a2 = await withToken(jwt('33333333-3333-4333-8333-333333333333')); // claims someone else; the verified user is still USER
+  const a3 = await withToken('not-a-jwt');
+  check('token claiming the real user: ok', a1.ok === true, a1);
+  check('token claiming another user: still the verified user (profile of the claimed one is never used)', a2.ok === true, a2);
+  check('opaque token: ok', a3.ok === true, a3);
+  const login = await import('../src/app/api/auth/login/route');
+  const l1 = await login.POST(new Request('http://x/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'T@t.io', password: 'pw' }) }), { params: {} }).then((r: Response) => r.json());
+  const l2 = await login.POST(new Request('http://x/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 't@t.io', password: 'nope' }) }), { params: {} }).then((r: Response) => r.json());
+  check('login returns the signed-in user\'s profile and a session', l1.ok && l1.data.user?.id === USER && l1.data.session.access_token === 'a', l1);
+  check('wrong password: refused, no profile in the reply', !l2.ok && l2.error.code === 'UNAUTHORIZED' && !('user' in (l2.data ?? {})), l2);
+
+  // 9f a database insert that never answers is cut off after 5 s with an "outcome unknown" error, never a hang
+  hangOrderInsert = true;
+  const t5 = Date.now();
+  const hung = await O({ order_id: crypto.randomUUID(), symbol: 'ETHUSDT', side: 'long', leverage: 2, margin: 5 });
+  hangOrderInsert = false;
+  const took = Date.now() - t5;
+  check('hung insert: answered within ~5 s with UPSTREAM_ERROR (not stored, not a refusal)', !hung.ok && hung.error.code === 'UPSTREAM_ERROR' && took >= 4500 && took < 7500, { took, hung });
+  const after = await O({ order_id: crypto.randomUUID(), symbol: 'ETHUSDT', side: 'long', leverage: 2, margin: 5 });
+  check('the account lock was released: the next order goes straight through', after.ok, after);
 
   // 10 cron tick
   db.orders = db.orders.filter((o) => o.account_id !== 'other');

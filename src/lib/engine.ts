@@ -19,25 +19,29 @@ import type {
   RiskResult,
 } from '@/lib/types';
 
-export async function getAccount(accountId: string): Promise<DbAccount> {
-  const { data, error } = await supabaseAdmin()
+/** A database call that hit its deadline (not a refusal by the database). */
+const deadlineHit = (message: string | undefined) => !!message && /abort|timed? ?out/i.test(message);
+
+export async function getAccount(accountId: string, signal?: AbortSignal): Promise<DbAccount> {
+  const q = supabaseAdmin()
     .from('accounts')
     .select('*')
-    .eq('id', accountId)
-    .maybeSingle<DbAccount>();
-  if (error) throw new ApiError('INTERNAL_ERROR', error.message);
+    .eq('id', accountId);
+  const { data, error } = await (signal ? q.abortSignal(signal) : q).maybeSingle<DbAccount>();
+  if (error) throw new ApiError(deadlineHit(error.message) ? 'UPSTREAM_ERROR' : 'INTERNAL_ERROR', error.message);
   if (!data) throw new ApiError('NOT_FOUND', 'Account not found.');
   return data;
 }
 
-export async function getOpenOrders(accountId: string): Promise<DbOrder[]> {
-  const { data, error } = await supabaseAdmin()
+export async function getOpenOrders(accountId: string, signal?: AbortSignal): Promise<DbOrder[]> {
+  const q = supabaseAdmin()
     .from('orders')
     .select('*')
     .eq('account_id', accountId)
     .eq('status', 'open')
     .order('created_at', { ascending: false });
-  if (error) throw new ApiError('INTERNAL_ERROR', error.message);
+  const { data, error } = await (signal ? q.abortSignal(signal) : q);
+  if (error) throw new ApiError(deadlineHit(error.message) ? 'UPSTREAM_ERROR' : 'INTERNAL_ERROR', error.message);
   return (data ?? []) as DbOrder[];
 }
 

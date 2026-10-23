@@ -48,17 +48,32 @@ async function authUserId(token: string): Promise<string> {
   return data.user.id;
 }
 
+/** The `sub` (user id) a JWT claims. NOT verified: it only chooses which profile row to read while the token is being verified. */
+function claimedUserId(token: string): string | null {
+  try {
+    const payload = JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString('utf8')) as { sub?: unknown };
+    return typeof payload.sub === 'string' && /^[0-9a-f-]{36}$/i.test(payload.sub) ? payload.sub : null;
+  } catch {
+    return null;
+  }
+}
+
+async function readProfile(userId: string) {
+  return supabaseAdmin().from('users').select('*').eq('id', userId).maybeSingle<DbUser>();
+}
+
 async function resolveUser(token: string): Promise<DbUser> {
-  const admin = supabaseAdmin();
-  const userId = await authUserId(token);
+  // Verifying the token and reading the profile are independent round trips to a far-away database, so they run
+  // together. The row read for the *claimed* user is only used if the verified user turns out to be the same one.
+  const claimed = claimedUserId(token);
+  const [userId, early] = await Promise.all([
+    authUserId(token),
+    claimed ? readProfile(claimed).catch(() => null) : Promise.resolve(null),
+  ]);
 
   // maybeSingle, so a genuine DB/permission failure is distinguishable
   // from "the row isn't there" instead of collapsing into one message.
-  const { data: profile, error } = await admin
-    .from('users')
-    .select('*')
-    .eq('id', userId)
-    .maybeSingle<DbUser>();
+  const { data: profile, error } = early && userId === claimed ? early : await readProfile(userId);
 
   if (error) {
     console.error('[auth] profile lookup failed', { userId, error: error.message });

@@ -9,20 +9,26 @@ export const dynamic = 'force-dynamic';
 export const POST = handle(async (req) => {
   const body = loginSchema.parse(await readJson(req));
 
-  const { data, error } = await supabaseAnon().auth.signInWithPassword({
-    email: body.email,
-    password: body.password,
-  });
+  // Password check (auth service) and profile lookup (database) are independent round trips: run them together. The
+  // profile found by e-mail is only returned if it belongs to the user who actually signed in.
+  const email = body.email.trim().toLowerCase();
+  const PROFILE = 'id, email, role, kyc_status, wallet_address, full_name, country, created_at';
+  const [signIn, byEmail] = await Promise.all([
+    supabaseAnon().auth.signInWithPassword({ email: body.email, password: body.password }),
+    supabaseAdmin().from('users').select(PROFILE).ilike('email', email.replace(/[%_\\]/g, '\\$&')).limit(2),
+  ]);
+  const { data, error } = signIn;
 
   if (error || !data.session || !data.user) {
     throw new ApiError('UNAUTHORIZED', 'Invalid email or password.');
   }
 
-  const { data: profile } = await supabaseAdmin()
-    .from('users')
-    .select('id, email, role, kyc_status, wallet_address, full_name, country, created_at')
-    .eq('id', data.user.id)
-    .maybeSingle<DbUser>();
+  let profile = (byEmail.data as unknown as DbUser[] | null)?.find((u) => u.id === data.user!.id) ?? null;
+  if (!profile) {
+    // e-mail on the profile differs from the sign-in e-mail (or the lookup failed): fall back to the id
+    const { data: byId } = await supabaseAdmin().from('users').select(PROFILE).eq('id', data.user.id).maybeSingle<DbUser>();
+    profile = byId;
+  }
 
   return ok({
     user: profile,

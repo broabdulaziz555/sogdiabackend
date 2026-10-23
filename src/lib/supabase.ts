@@ -25,7 +25,7 @@ const timedFetch: typeof fetch = async (input, init) => {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), method === 'GET' || method === 'HEAD' ? DB_TIMEOUT_MS : DB_WRITE_TIMEOUT_MS);
     const outer = init?.signal;
-    if (outer) outer.addEventListener('abort', () => ctl.abort(), { once: true });
+    if (outer) { if (outer.aborted) ctl.abort(); else outer.addEventListener('abort', () => ctl.abort(), { once: true }); }
     return fetch(input, { ...init, signal: ctl.signal }).finally(() => clearTimeout(timer));
   };
   try {
@@ -35,7 +35,7 @@ const timedFetch: typeof fetch = async (input, init) => {
     return res;
   } catch (err) {
     console.error(`[db] FAILED after ${Date.now() - t0}ms ${method} ${where}`, (err as Error)?.name);
-    if (method === 'GET' || method === 'HEAD') return attempt();
+    if ((method === 'GET' || method === 'HEAD') && !init?.signal?.aborted) return attempt(); // a caller that gave up is not retried
     throw err;
   }
 };
