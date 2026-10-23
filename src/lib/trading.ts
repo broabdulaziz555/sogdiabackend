@@ -1,13 +1,12 @@
 import { ApiError } from '@/lib/http';
-import { requireAccount } from '@/lib/auth';
+import { assertAccountAccess } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase';
 import { getPrice } from '@/lib/binance';
 import { applySpread, liquidationPrice, money, positionSize, price, quantity, toPosition } from '@/lib/math';
-import { buildPositions, evaluateAccount, getOpenOrders } from '@/lib/engine';
+import { getAccount, getOpenOrders } from '@/lib/engine';
 import { computeMetrics, isTradable } from '@/lib/risk';
-import { withAccountLock } from '@/lib/accountLock';
-import { serializeAccount } from '@/lib/accounts';
-import type { AccountMetrics, DbOrder, DbUser, OrderSide, Position } from '@/lib/types';
+import { finishedSince, isAccountBusy, withAccountLock } from '@/lib/accountLock';
+import type { DbAccount, DbOrder, DbUser, OrderSide, Position } from '@/lib/types';
 
 export interface OpenParams {
   user: Pick<DbUser, 'id' | 'role'>;
@@ -26,17 +25,40 @@ export interface OpenParams {
   stopLoss?: number | null;
   /** A limit order fills at its own price instead of the market. */
   entryPrice?: number;
-  /** Skip the background risk sweep (the caller runs its own). */
-  skipSweep?: boolean;
+  /** Reads started earlier (see prefetchOpen), so they overlap with resolving the user. */
+  prefetched?: OpenReads;
 }
 
 export interface OpenResult {
   position: Position;
-  account?: ReturnType<typeof serializeAccount>;
-  metrics?: AccountMetrics;
-  risk?: { breached: boolean; reason: string | null; status: string };
   /** True when this id had already been stored and nothing new was opened. */
   replayed: boolean;
+}
+
+/** Everything an open needs to read, started together. None of it depends on who the caller is. */
+export interface OpenReads {
+  startedAt: number;
+  account: Promise<DbAccount>;
+  orders: Promise<DbOrder[]>;
+  mid: Promise<number>;
+  existing: Promise<DbOrder | null>;
+}
+
+/**
+ * Start every read an open needs at the same moment: the account row, the account's open orders, the Binance price and
+ * the lookup of the order id. The route calls this BEFORE it resolves the user, so authentication, the database reads
+ * and the price all travel in parallel. (A failed read stays a rejected promise until executeOpen awaits it.)
+ */
+export function prefetchOpen(p: { accountId: string; symbol: string; orderId?: string }): OpenReads {
+  const reads: OpenReads = {
+    startedAt: Date.now(),
+    account: getAccount(p.accountId),
+    orders: getOpenOrders(p.accountId),
+    mid: getPrice(p.symbol),
+    existing: p.orderId ? findOrder(p.orderId) : Promise.resolve(null),
+  };
+  for (const r of Object.values(reads)) if (r instanceof Promise) r.catch(() => undefined); // surfaced when awaited, never "unhandled"
+  return reads;
 }
 
 function replay(order: DbOrder): OpenResult {
@@ -53,21 +75,30 @@ function replay(order: DbOrder): OpenResult {
 /**
  * Open a B-book position. Pre-trade guards, and only these:
  *   1. account is active  2. symbol is tradable  3. leverage <= account max  4. margin <= free margin
- * (There is deliberately no drawdown gate here; see the note on /api/trade/open.)
  *
- * Round trips: one parallel read (account, open orders, price, id lookup), one insert. Nothing else is awaited: the
- * risk sweep runs after the reply.
+ * Critical path: ONE parallel read (account, open orders, price, id lookup — started before the user is even resolved),
+ * ONE insert, return. The risk engine is not involved: it runs on the positions poll and on the cron tick.
+ *
+ * The reads may have been started before this call got the account lock. They are used as they are only when nothing
+ * else touched the account in between; otherwise they are read again inside the lock, so two orders fired back to
+ * back can never both pass the free-margin check against the same balance.
  */
 export async function executeOpen(p: OpenParams): Promise<OpenResult> {
   const { user, accountId, orderId } = p;
+  const reads = p.prefetched ?? prefetchOpen({ accountId, symbol: p.symbol, orderId });
 
+  // authorise on the account row that was read in parallel with the user (before taking the lock)
+  const first = await reads.account;
+  assertAccountAccess(first, user);
+
+  const queued = isAccountBusy(accountId);
   return withAccountLock(accountId, async () => {
-    const [account, openOrders, mid, existing] = await Promise.all([
-      requireAccount(accountId, user as DbUser),
-      getOpenOrders(accountId),
-      getPrice(p.symbol),
-      orderId ? findOrder(orderId) : Promise.resolve(null),
-    ]);
+    const current = !queued && !finishedSince(accountId, reads.startedAt);
+    const [account, openOrders, mid, existing] = await Promise.all(
+      current
+        ? [reads.account, reads.orders, reads.mid, reads.existing]
+        : [getAccount(accountId), getOpenOrders(accountId), reads.mid, orderId ? findOrder(orderId) : Promise.resolve(null)],
+    ) as [DbAccount, DbOrder[], number, DbOrder | null];
 
     if (existing) return sameOwner(existing, user, accountId) ? replay(existing) : conflict();
 
@@ -98,32 +129,29 @@ export async function executeOpen(p: OpenParams): Promise<OpenResult> {
     const qty = quantity(notional, entry);
     const liq = liquidationPrice(entry, p.side, p.leverage);
 
-    const [ins, marks] = await Promise.all([
-      supabaseAdmin()
-        .from('orders')
-        .insert({
-          ...(orderId ? { id: orderId } : {}),
-          account_id: account.id,
-          user_id: account.user_id,
-          symbol: p.symbol,
-          side: p.side,
-          leverage: p.leverage,
-          margin: p.margin,
-          position_size: notional,
-          quantity: qty,
-          entry_price: entry,
-          mark_price_at_open: mid,
-          liquidation_price: liq,
-          take_profit: p.takeProfit ?? null,
-          stop_loss: p.stopLoss ?? null,
-          status: 'open',
-        })
-        .select('*')
-        .single<DbOrder>(),
-      buildPositions(openOrders).catch(() => null),
-    ]);
+    const ins = await supabaseAdmin()
+      .from('orders')
+      .insert({
+        ...(orderId ? { id: orderId } : {}),
+        account_id: account.id,
+        user_id: account.user_id,
+        symbol: p.symbol,
+        side: p.side,
+        leverage: p.leverage,
+        margin: p.margin,
+        position_size: notional,
+        quantity: qty,
+        entry_price: entry,
+        mark_price_at_open: mid,
+        liquidation_price: liq,
+        take_profit: p.takeProfit ?? null,
+        stop_loss: p.stopLoss ?? null,
+        status: 'open',
+      })
+      .select('*')
+      .single<DbOrder>();
 
-    let order = ins.data;
+    const order = ins.data;
     if (ins.error || !order) {
       // Lost a race with another instance that stored the same id: that is the same order, not an error.
       if (orderId && (ins.error as { code?: string } | null)?.code === '23505') {
@@ -134,27 +162,8 @@ export async function executeOpen(p: OpenParams): Promise<OpenResult> {
     }
 
     console.log('[trade/open] stored', { order_id: order.id, account_id: account.id, symbol: p.symbol, side: p.side, leverage: p.leverage, margin: p.margin, mid, entry });
-
-    const position = toPosition(order, mid);
-    const metrics = marks ? computeMetrics(account, [position, ...marks]) : null;
-
-    // The order is stored, so the trade is real from here on. The risk engine (liquidations, drawdown rules, the
-    // evaluation target) is never awaited: it runs behind the reply, on every positions poll and on the cron tick.
-    if (!p.skipSweep) {
-      void evaluateAccount(account.id).catch((err) =>
-        console.error('[trade/open] background evaluation failed', { account_id: account.id, order_id: order!.id, error: err instanceof Error ? err.message : String(err) }),
-      );
-    }
-
-    return {
-      position,
-      replayed: false,
-      ...(metrics && {
-        account: serializeAccount({ ...account, equity: metrics.equity }),
-        metrics,
-        risk: { breached: false, reason: null, status: account.status },
-      }),
-    };
+    // Nothing after the insert: the reply goes out now.
+    return { position: toPosition(order, mid), replayed: false };
   });
 }
 

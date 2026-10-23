@@ -1,7 +1,7 @@
 import { handle, ok, readJson } from '@/lib/http';
 import { requireUser } from '@/lib/auth';
 import { assertTradable } from '@/lib/binance';
-import { executeOpen } from '@/lib/trading';
+import { executeOpen, prefetchOpen } from '@/lib/trading';
 import { openTradeSchema } from '@/lib/validation';
 import { rateLimit } from '@/lib/ratelimit';
 
@@ -11,30 +11,35 @@ export const dynamic = 'force-dynamic';
  * POST /api/trade/open
  * B-book fill: live Binance mid + 0.05% spread against the trader.
  *
- * The whole request is: auth → [account + balance, open orders, Binance price] read in parallel → guards → ONE insert →
- * 200. The risk engine (liquidation sweep, drawdown rules, evaluation target) is never awaited here; it runs behind the
- * reply, on every GET /trade/positions and on /api/cron/tick.
+ * The request is: [user, account, open orders, Binance price, order-id lookup] all in flight at once → guards →
+ * ONE insert → 200. No risk engine here: liquidations, drawdown rules and the evaluation target are checked on every
+ * GET /trade/positions and by /api/cron/tick.
  *
  * Idempotent: the client sends `order_id` (a UUID it generated). That id becomes the order's primary key, so a request
  * repeated after a timeout, a dropped connection or a double tap returns the order already stored instead of opening a
  * second one. The logic lives in lib/trading.ts (shared with server-side limit/stop fills).
  */
 export const POST = handle(async (req) => {
+  const body = openTradeSchema.parse(await readJson(req));
+  const symbol = assertTradable(body.symbol);
+
+  // everything that does not depend on who is asking starts now, alongside authentication
+  const prefetched = prefetchOpen({ accountId: body.account_id, symbol, orderId: body.order_id });
   const user = await requireUser(req);
   rateLimit(`trade-open:${user.id}`, 240, 60_000);
-  const body = openTradeSchema.parse(await readJson(req));
 
   const r = await executeOpen({
     user,
     accountId: body.account_id,
     orderId: body.order_id,
-    symbol: assertTradable(body.symbol),
+    symbol,
     side: body.side,
     leverage: body.leverage,
     margin: body.margin,
     takeProfit: body.take_profit,
     stopLoss: body.stop_loss,
+    prefetched,
   });
 
-  return ok({ order: r.position, replayed: r.replayed, account: r.account, metrics: r.metrics, risk: r.risk });
+  return ok({ order: r.position, replayed: r.replayed });
 });

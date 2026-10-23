@@ -172,6 +172,23 @@ const check = (name: string, cond: boolean, extra?: any) => { console.log(cond ?
   check('a stand-in price never triggers a stop-loss (SL above the stand-in would fire on a live price)', db.orders.filter((o) => o.id.endsWith('1111-4111-8111-111111111111') && o.status === 'open').length === 2);
   db.orders = db.orders.filter((o) => !o.id.endsWith('1111-4111-8111-111111111111'));
 
+  // 9c opens fired together can never overspend the free margin (reads start before the lock; stale ones are re-read)
+  const freeNow = (await list()).metrics.free_margin;
+  const race = await Promise.all([1, 2, 3, 4].map(() => O({ order_id: crypto.randomUUID(), symbol: 'ETHUSDT', side: 'long', leverage: 2, margin: Math.floor(freeNow * 0.6) })));
+  check('4 concurrent opens of 60% of free margin: exactly one is accepted', race.filter((r) => r.ok).length === 1 && race.filter((r) => !r.ok && r.error.code === 'INSUFFICIENT_MARGIN').length === 3, race.map((r) => r.ok || r.error.code));
+  check('open answers with the order only (no risk-engine payload)', race.find((r) => r.ok).data.metrics === undefined && race.find((r) => r.ok).data.order.id != null);
+  // cleanup so later checks are unaffected
+  for (const r of race) if (r.ok) db.orders = db.orders.filter((o) => o.id !== r.data.order.id);
+
+  // 9d the risk engine does NOT run on open: a position past its liquidation price stays open until the positions poll
+  const doomed = { id: crypto.randomUUID(), account_id: ACC, user_id: USER, status: 'open', symbol: 'BTCUSDT', side: 'long', margin: 20, leverage: 10, position_size: 200, quantity: 0.002, entry_price: 100000, mark_price_at_open: 100000, liquidation_price: 90000, take_profit: null, stop_loss: null, created_at: new Date().toISOString() };
+  db.orders.push(doomed);
+  const oo = await O({ order_id: crypto.randomUUID(), symbol: 'ETHUSDT', side: 'long', leverage: 2, margin: 10 });
+  await new Promise((r) => setTimeout(r, 300));
+  check('open succeeded and did not sweep (doomed position still open right after)', oo.ok && db.orders.find((o) => o.id === doomed.id)!.status === 'open', db.orders.find((o) => o.id === doomed.id)?.status);
+  await list();
+  check('the next positions poll liquidates it', db.orders.find((o) => o.id === doomed.id)!.status !== 'open', db.orders.find((o) => o.id === doomed.id)?.status);
+
   // 10 cron tick
   db.orders = db.orders.filter((o) => o.account_id !== 'other');
   pendingEnabled = true;

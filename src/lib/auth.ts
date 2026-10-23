@@ -134,12 +134,17 @@ export async function requireAccount(
     });
   }
 
-  if (data.user_id !== user.id && !isStaffRole(user.role)) {
-    throw new ApiError('FORBIDDEN', `Account ${accountId} belongs to another user.`, {
-      requested_account_id: accountId,
+  assertAccountAccess(data, user);
+  return data;
+}
+
+/** The ownership rule on its own, for callers that read the account in parallel with resolving the user. */
+export function assertAccountAccess(account: DbAccount, user: Pick<DbUser, 'id' | 'role'>): void {
+  if (account.user_id !== user.id && !isStaffRole(user.role)) {
+    throw new ApiError('FORBIDDEN', `Account ${account.id} belongs to another user.`, {
+      requested_account_id: account.id,
     });
   }
-  return data;
 }
 
 /** Guard machine-to-machine cron routes. */

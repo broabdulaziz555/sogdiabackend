@@ -189,7 +189,6 @@ export async function fillDue(
         takeProfit: o.take_profit,
         stopLoss: o.stop_loss,
         entryPrice: entry,
-        skipSweep: true,
       });
       if (!r.replayed) opened += 1;
       await settle(o.id, 'filled');
