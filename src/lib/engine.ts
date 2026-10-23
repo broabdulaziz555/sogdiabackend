@@ -8,7 +8,7 @@ import {
   pnlFor,
   toPosition,
 } from '@/lib/math';
-import { breachMessage, checkBreach, computeMetrics } from '@/lib/risk';
+import { RISK_ENGINE_ON, breachMessage, checkBreach, computeMetrics } from '@/lib/risk';
 import { issueCertificate } from '@/lib/certificates';
 import type {
   AccountMetrics,
@@ -138,6 +138,7 @@ function resolveAutoClose(
  */
 export async function sweepLiquidations(positions: Position[]): Promise<AutoClose[]> {
   const closed: AutoClose[] = [];
+  if (!RISK_ENGINE_ON) return closed; // engine off: nothing is ever closed automatically
 
   for (const p of positions) {
     if (p.price_source === 'fallback') continue; // never settle a trade on a stand-in price
@@ -224,7 +225,8 @@ export interface EvaluationResult {
 }
 
 /**
- * The heart of the risk engine. Runs after every open/close and on demand:
+ * The heart of the risk engine. Runs on every positions poll, after a close, and on demand. Steps 1, 3 and 4 act only
+ * when RISK_ENGINE=on (see risk.ts); with the engine off this function just reads and computes.
  *   1. liquidate anything past its liquidation price
  *   2. recompute equity from live marks
  *   3. fail the account if a drawdown floor is breached (flattening positions)
@@ -291,7 +293,7 @@ export async function evaluateAccount(input: DbAccount | string, preloadedOrders
   }
 
   // 4 — evaluation passed (One-Step only; Instant has no target)
-  if (!terminal && metrics.target_reached && account.profit_target_pct !== null) {
+  if (RISK_ENGINE_ON && !terminal && metrics.target_reached && account.profit_target_pct !== null) {
     const { data, error } = await supabaseAdmin()
       .from('accounts')
       .update({ status: 'passed', equity: metrics.equity })

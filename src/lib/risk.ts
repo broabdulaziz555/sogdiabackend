@@ -88,6 +88,15 @@ export function computeMetrics(account: DbAccount, positions: Position[]): Accou
 }
 
 /**
+ * MASTER SWITCH for everything that changes an account or a position by itself: liquidations, stop-loss, take-profit,
+ * drawdown breaches (flattening) and the evaluation pass. It is OFF unless RISK_ENGINE=on is set in the environment.
+ * While it is off, polling only READS: no order and no account status is ever modified by the engine. Equity is still
+ * computed and shown; manual closes and admin actions still work.
+ */
+export const RISK_ENGINE_ON = process.env.RISK_ENGINE === 'on';
+if (!RISK_ENGINE_ON) console.warn('[risk] automatic risk engine is OFF (set RISK_ENGINE=on to enable liquidations, SL/TP and drawdown breaches)');
+
+/**
  * Simulation mode: drawdown is still measured and shown, but it no longer fails the account or flattens its
  * positions. Set ENFORCE_DRAWDOWN_BREACH=1 in the environment to bring the hard breach back.
  */
@@ -95,7 +104,7 @@ const ENFORCE_BREACH = process.env.ENFORCE_DRAWDOWN_BREACH === '1';
 
 /** Which rule, if any, the account has just violated. Max DD is checked first. */
 export function checkBreach(metrics: AccountMetrics): BreachReason {
-  if (!ENFORCE_BREACH) return null;
+  if (!RISK_ENGINE_ON || !ENFORCE_BREACH) return null;
   if (metrics.equity <= metrics.max_dd_limit) return 'MAX_DRAWDOWN';
   if (metrics.equity <= metrics.daily_dd_limit) return 'DAILY_DRAWDOWN';
   return null;

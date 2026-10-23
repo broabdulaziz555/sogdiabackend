@@ -5,14 +5,18 @@ import { listPending } from '@/lib/pending';
 import { runCycle } from '@/lib/cycle';
 import { serializeAccount } from '@/lib/accounts';
 import { accountIdSchema } from '@/lib/validation';
+import { RISK_ENGINE_ON } from '@/lib/risk';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * GET /api/trade/positions?account_id=uuid
  * The terminal snapshot: open positions with live PnL, working limit/stop orders, account figures.
- * Each call also runs one engine cycle (limit/stop fills, liquidations, SL/TP), so polling drives the engine
- * for the person watching; /api/cron/tick covers everyone else.
+ *
+ * READ-ONLY for positions while the risk engine is off (the default, see RISK_ENGINE in lib/risk.ts): nothing here
+ * liquidates, stops out, takes profit or flattens, and no order status is ever written. The only writes left in the
+ * cycle are the opening of limit/stop orders the market has reached, and the account's equity figure.
+ * With RISK_ENGINE=on, each call also runs the liquidation / SL / TP / drawdown checks.
  */
 export const GET = handle(async (req) => {
   const user = await requireUser(req);
@@ -37,7 +41,7 @@ export const GET = handle(async (req) => {
 
   return ok({
     positions,
-    debug: { account_id, db_open_orders: orders.length, returned: positions.length, closed_by_cycle: result.liquidated.length, account_status: result.risk.status },
+    debug: { account_id, db_open_orders: orders.length, returned: positions.length, closed_by_cycle: result.liquidated.length, account_status: result.risk.status, risk_engine: RISK_ENGINE_ON ? 'on' : 'off' },
     pending: pendingAfter,
     liquidated: result.liquidated,
     account: serializeAccount(result.account),

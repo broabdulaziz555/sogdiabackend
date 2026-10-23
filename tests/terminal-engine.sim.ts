@@ -189,8 +189,16 @@ const check = (name: string, cond: boolean, extra?: any) => { console.log(cond ?
   const oo = await O({ order_id: crypto.randomUUID(), symbol: 'ETHUSDT', side: 'long', leverage: 2, margin: 10 });
   await new Promise((r) => setTimeout(r, 300));
   check('open succeeded and did not sweep (doomed position still open right after)', oo.ok && db.orders.find((o) => o.id === doomed.id)!.status === 'open', db.orders.find((o) => o.id === doomed.id)?.status);
-  await list();
-  check('the next positions poll liquidates it', db.orders.find((o) => o.id === doomed.id)!.status !== 'open', db.orders.find((o) => o.id === doomed.id)?.status);
+  const statusesBefore = JSON.stringify(db.orders.map((o) => [o.id, o.status]));
+  const polled = await list();
+  const engineOn = process.env.RISK_ENGINE === 'on';
+  if (engineOn) {
+    check('RISK_ENGINE=on: the next positions poll liquidates it', db.orders.find((o) => o.id === doomed.id)!.status !== 'open', db.orders.find((o) => o.id === doomed.id)?.status);
+  } else {
+    check('RISK_ENGINE off: polling leaves a position past its liquidation price OPEN and lists it', db.orders.find((o) => o.id === doomed.id)!.status === 'open' && polled.positions.some((p: any) => p.id === doomed.id), db.orders.find((o) => o.id === doomed.id)?.status);
+    check('RISK_ENGINE off: a poll changes no order status at all', JSON.stringify(db.orders.map((o) => [o.id, o.status])) === statusesBefore && polled.liquidated.length === 0 && polled.debug.risk_engine === 'off');
+    db.orders = db.orders.filter((o) => o.id !== doomed.id);
+  }
 
   // 9e auth: the profile is read while the token is verified; the early read counts only for the verified user
   const jwt = (sub: string) => `h.${Buffer.from(JSON.stringify({ sub })).toString('base64url')}.s`;
