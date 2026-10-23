@@ -67,9 +67,15 @@ export function handle<Ctx = unknown>(
   fn: (req: Request, ctx: Ctx) => Promise<Response>,
 ) {
   return async (req: Request, ctx: Ctx): Promise<Response> => {
+    const t0 = Date.now();
+    const path = (() => { try { return new URL(req.url).pathname; } catch { return '?'; } })();
     try {
-      return await fn(req, ctx);
+      const res = await fn(req, ctx);
+      const ms = Date.now() - t0;
+      if (ms > 2000) console.warn(`[api] slow ${ms}ms ${req.method} ${path}`);
+      return res;
     } catch (err) {
+      console.warn(`[api] ${req.method} ${path} failed after ${Date.now() - t0}ms:`, err instanceof ApiError ? `${err.code} ${err.message}` : err);
       if (err instanceof ApiError) {
         return fail(err.code, err.message, err.details);
       }

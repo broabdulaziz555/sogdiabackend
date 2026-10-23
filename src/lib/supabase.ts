@@ -17,6 +17,8 @@ const DB_TIMEOUT_MS = 10_000;
 
 const timedFetch: typeof fetch = async (input, init) => {
   const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
+  const where = (() => { try { return new URL(input instanceof Request ? input.url : String(input)).pathname; } catch { return '?'; } })();
+  const t0 = Date.now();
   const attempt = () => {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), DB_TIMEOUT_MS);
@@ -25,8 +27,12 @@ const timedFetch: typeof fetch = async (input, init) => {
     return fetch(input, { ...init, signal: ctl.signal }).finally(() => clearTimeout(timer));
   };
   try {
-    return await attempt();
+    const res = await attempt();
+    const ms = Date.now() - t0;
+    if (ms > 1500) console.warn(`[db] slow ${ms}ms ${method} ${where}`);
+    return res;
   } catch (err) {
+    console.error(`[db] FAILED after ${Date.now() - t0}ms ${method} ${where}`, (err as Error)?.name);
     if (method === 'GET' || method === 'HEAD') return attempt();
     throw err;
   }
