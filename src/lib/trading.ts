@@ -4,7 +4,7 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { getPrice } from '@/lib/binance';
 import { applySpread, liquidationPrice, money, positionSize, price, quantity, toPosition } from '@/lib/math';
 import { buildPositions, evaluateAccount, getOpenOrders } from '@/lib/engine';
-import { checkBreach, computeMetrics, isTradable } from '@/lib/risk';
+import { computeMetrics, isTradable } from '@/lib/risk';
 import { withAccountLock } from '@/lib/accountLock';
 import { serializeAccount } from '@/lib/accounts';
 import type { AccountMetrics, DbOrder, DbUser, OrderSide, Position } from '@/lib/types';
@@ -55,7 +55,8 @@ function replay(order: DbOrder): OpenResult {
  *   1. account is active  2. symbol is tradable  3. leverage <= account max  4. margin <= free margin
  * (There is deliberately no drawdown gate here; see the note on /api/trade/open.)
  *
- * Round trips: one parallel read (account, open orders, price, id lookup), one insert. The risk sweep runs after the reply.
+ * Round trips: one parallel read (account, open orders, price, id lookup), one insert. Nothing else is awaited: the
+ * risk sweep runs after the reply.
  */
 export async function executeOpen(p: OpenParams): Promise<OpenResult> {
   const { user, accountId, orderId } = p;
@@ -137,37 +138,23 @@ export async function executeOpen(p: OpenParams): Promise<OpenResult> {
     const position = toPosition(order, mid);
     const metrics = marks ? computeMetrics(account, [position, ...marks]) : null;
 
-    // The order is stored, so the trade is real from here on: nothing below may turn into a rejected order.
-    if (metrics && checkBreach(metrics) === null) {
-      if (!p.skipSweep) {
-        void evaluateAccount(account.id).catch((err) =>
-          console.error('[trade/open] background evaluation failed', { account_id: account.id, order_id: order!.id, error: err instanceof Error ? err.message : String(err) }),
-        );
-      }
-      return {
-        position,
-        replayed: false,
-        ...(metrics && {
-          account: serializeAccount({ ...account, equity: metrics.equity }),
-          metrics,
-          risk: { breached: false, reason: null, status: account.status },
-        }),
-      };
+    // The order is stored, so the trade is real from here on. The risk engine (liquidations, drawdown rules, the
+    // evaluation target) is never awaited: it runs behind the reply, on every positions poll and on the cron tick.
+    if (!p.skipSweep) {
+      void evaluateAccount(account.id).catch((err) =>
+        console.error('[trade/open] background evaluation failed', { account_id: account.id, order_id: order!.id, error: err instanceof Error ? err.message : String(err) }),
+      );
     }
 
-    try {
-      const result = await evaluateAccount(account.id);
-      return {
-        position,
-        replayed: false,
-        account: serializeAccount(result.account),
-        metrics: result.metrics,
-        risk: { breached: result.risk.breached, reason: result.risk.reason, status: result.risk.status },
-      };
-    } catch (err) {
-      console.error('[trade/open] order opened but post-trade evaluation failed', { account_id: account.id, order_id: order.id, error: err instanceof Error ? err.message : String(err) });
-      return { position, replayed: false };
-    }
+    return {
+      position,
+      replayed: false,
+      ...(metrics && {
+        account: serializeAccount({ ...account, equity: metrics.equity }),
+        metrics,
+        risk: { breached: false, reason: null, status: account.status },
+      }),
+    };
   });
 }
 
