@@ -2,8 +2,9 @@ import { ApiError, handle, ok, readJson } from '@/lib/http';
 import { requireUser } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase';
 import { getPrice } from '@/lib/binance';
-import { applySpread, isLiquidated, money, pnlFor, pnlPct } from '@/lib/math';
-import { evaluateAccount, settleOrder } from '@/lib/engine';
+import { applySpread, isLiquidated, money, pnlFor, pnlPct, toPosition } from '@/lib/math';
+import { buildPositions, evaluateAccount, getAccount, getOpenOrders, settleOrder } from '@/lib/engine';
+import { computeMetrics } from '@/lib/risk';
 import { snapshotEquity } from '@/lib/snapshots';
 import { serializeAccount } from '@/lib/accounts';
 import { closeTradeSchema } from '@/lib/validation';
@@ -50,14 +51,14 @@ export const POST = handle(async (req) => {
     hitLiq ? 'liquidation' : 'manual',
   );
 
-  const result = await evaluateAccount(order.account_id);
-  // Telemetry only: don't make the trader wait for the equity-curve insert.
-  void snapshotEquity(
-    result.account.id,
-    Number(result.account.equity),
-    Number(result.account.balance),
-    'trade_close',
-  ).catch(() => undefined);
+  // Reply as soon as the position is settled: one parallel read for the fresh account and the remaining book, no sweep.
+  // The full risk pass (liquidations, evaluation target, equity snapshot) runs behind the reply and on every poll.
+  const [account, rest] = await Promise.all([getAccount(order.account_id), getOpenOrders(order.account_id)]);
+  const remaining = await buildPositions(rest).catch(() => rest.map((o) => toPosition(o, Number(o.mark_price_at_open))));
+  const metrics = computeMetrics(account, remaining);
+  void evaluateAccount(account.id)
+    .then((r) => snapshotEquity(r.account.id, Number(r.account.equity), Number(r.account.balance), 'trade_close'))
+    .catch((err) => console.error('[trade/close] background evaluation failed', { order_id: order.id, error: err instanceof Error ? err.message : String(err) }));
 
   return ok({
     order: {
@@ -77,12 +78,8 @@ export const POST = handle(async (req) => {
       created_at: settled.created_at,
       closed_at: settled.closed_at,
     },
-    account: serializeAccount(result.account),
-    metrics: result.metrics,
-    risk: {
-      breached: result.risk.breached,
-      reason: result.risk.reason,
-      status: result.risk.status,
-    },
+    account: serializeAccount(account),
+    metrics,
+    risk: { breached: false, reason: null, status: account.status },
   });
 });

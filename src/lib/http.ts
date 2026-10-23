@@ -15,6 +15,7 @@ export type ErrorCode =
   | 'DUPLICATE'
   | 'RATE_LIMITED'
   | 'UPSTREAM_ERROR'
+  | 'FEATURE_UNAVAILABLE'
   | 'INTERNAL_ERROR';
 
 const STATUS_BY_CODE: Record<ErrorCode, number> = {
@@ -31,6 +32,7 @@ const STATUS_BY_CODE: Record<ErrorCode, number> = {
   DUPLICATE: 409,
   RATE_LIMITED: 429,
   UPSTREAM_ERROR: 502,
+  FEATURE_UNAVAILABLE: 501,
   INTERNAL_ERROR: 500,
 };
 

@@ -36,12 +36,32 @@ export const updateMeSchema = z
 
 export const openTradeSchema = z.object({
   account_id: z.string().uuid(),
+  /** Client-generated order id: makes the request safe to repeat (see lib/trading.ts). */
+  order_id: z.string().uuid().optional(),
   symbol: z.string().trim().toUpperCase().min(5).max(20),
   side: z.enum(['long', 'short']),
   leverage: z.number().int().min(MIN_LEVERAGE).max(MAX_LEVERAGE),
   margin: z.number().positive().max(1_000_000),
   take_profit: z.number().positive().nullable().optional(),
   stop_loss: z.number().positive().nullable().optional(),
+});
+
+export const pendingSchema = z.object({
+  id: z.string().uuid().optional(),
+  account_id: z.string().uuid(),
+  symbol: z.string().trim().toUpperCase().min(5).max(20),
+  side: z.enum(['long', 'short']),
+  kind: z.enum(['limit', 'stop']),
+  trigger_price: z.number().positive(),
+  leverage: z.number().int().min(MIN_LEVERAGE).max(MAX_LEVERAGE),
+  margin: z.number().positive().max(1_000_000),
+  take_profit: z.number().positive().nullable().optional(),
+  stop_loss: z.number().positive().nullable().optional(),
+});
+
+export const cancelPendingSchema = z.object({
+  id: z.string().uuid(),
+  account_id: z.string().uuid(),
 });
 
 export const closeTradeSchema = z.object({

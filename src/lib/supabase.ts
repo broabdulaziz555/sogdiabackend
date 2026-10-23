@@ -14,6 +14,8 @@ let cached: SupabaseClient | null = null;
  * Reads are retried once; writes are never retried automatically, so an order can not be stored twice.
  */
 const DB_TIMEOUT_MS = 10_000;
+/** Writes get longer: aborting one that is already committing only creates doubt (the client's retries are idempotent either way). */
+const DB_WRITE_TIMEOUT_MS = 20_000;
 
 const timedFetch: typeof fetch = async (input, init) => {
   const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
@@ -21,7 +23,7 @@ const timedFetch: typeof fetch = async (input, init) => {
   const t0 = Date.now();
   const attempt = () => {
     const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), DB_TIMEOUT_MS);
+    const timer = setTimeout(() => ctl.abort(), method === 'GET' || method === 'HEAD' ? DB_TIMEOUT_MS : DB_WRITE_TIMEOUT_MS);
     const outer = init?.signal;
     if (outer) outer.addEventListener('abort', () => ctl.abort(), { once: true });
     return fetch(input, { ...init, signal: ctl.signal }).finally(() => clearTimeout(timer));

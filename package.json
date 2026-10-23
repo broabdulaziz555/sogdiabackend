@@ -8,7 +8,8 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "node tests/margin-validation.test.mjs && node tests/promo-limits.test.mjs",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:sim": "npx tsx tests/terminal-engine.sim.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

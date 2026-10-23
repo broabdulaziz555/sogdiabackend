@@ -1,6 +1,8 @@
 import { handle, ok } from '@/lib/http';
 import { requireAccount, requireUser } from '@/lib/auth';
-import { evaluateAccount, getOpenOrders } from '@/lib/engine';
+import { getOpenOrders } from '@/lib/engine';
+import { listPending } from '@/lib/pending';
+import { runCycle } from '@/lib/cycle';
 import { serializeAccount } from '@/lib/accounts';
 import { accountIdSchema } from '@/lib/validation';
 
@@ -8,22 +10,26 @@ export const dynamic = 'force-dynamic';
 
 /**
  * GET /api/trade/positions?account_id=uuid
- * Open positions with live PnL. Liquidations are swept on every call,
- * so polling this endpoint (2–5s) drives the liquidation engine.
+ * The terminal snapshot: open positions with live PnL, working limit/stop orders, account figures.
+ * Each call also runs one engine cycle (limit/stop fills, liquidations, SL/TP), so polling drives the engine
+ * for the person watching; /api/cron/tick covers everyone else.
  */
 export const GET = handle(async (req) => {
   const user = await requireUser(req);
   const url = new URL(req.url);
-  const { account_id } = accountIdSchema.parse({
-    account_id: url.searchParams.get('account_id'),
-  });
+  const { account_id } = accountIdSchema.parse({ account_id: url.searchParams.get('account_id') });
 
-  // The account row (with its ownership check) and the open orders are read side by side: one round trip fewer per poll.
-  const [account, orders] = await Promise.all([requireAccount(account_id, user), getOpenOrders(account_id)]);
-  const result = await evaluateAccount(account, orders);
+  // Account (with its ownership check), open orders and working orders are read side by side: one round trip.
+  const [account, orders, pending] = await Promise.all([
+    requireAccount(account_id, user),
+    getOpenOrders(account_id),
+    listPending(account_id),
+  ]);
+  const { result, pending: pendingAfter } = await runCycle(user, account, { orders, pending });
 
   return ok({
     positions: result.positions,
+    pending: pendingAfter,
     liquidated: result.liquidated,
     account: serializeAccount(result.account),
     metrics: result.metrics,
@@ -32,5 +38,6 @@ export const GET = handle(async (req) => {
       reason: result.risk.reason,
       status: result.risk.status,
     },
+    server_time: Date.now(),
   });
 });
