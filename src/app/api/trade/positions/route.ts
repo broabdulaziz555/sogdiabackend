@@ -18,6 +18,7 @@ export const dynamic = 'force-dynamic';
  * market has reached, and the account's equity figure.
  */
 export const GET = handle(async (req) => {
+  const t0 = Date.now();
   const user = await requireUser(req);
   const url = new URL(req.url);
   const { account_id } = accountIdSchema.parse({ account_id: url.searchParams.get('account_id') });
@@ -40,7 +41,7 @@ export const GET = handle(async (req) => {
 
   return ok({
     positions,
-    debug: { account_id, db_open_orders: orders.length, returned: positions.length, closed_by_cycle: result.liquidated.length, account_status: result.risk.status, risk_engine: RISK_ENGINE_ON ? 'on' : 'off' },
+    debug: { account_id, db_open_orders: orders.length, returned: positions.length, closed_by_cycle: result.liquidated.length, account_status: result.risk.status, risk_engine: RISK_ENGINE_ON ? 'on' : 'off', server_ms: Date.now() - t0 },
     pending: pendingAfter,
     liquidated: result.liquidated,
     account: serializeAccount(result.account),

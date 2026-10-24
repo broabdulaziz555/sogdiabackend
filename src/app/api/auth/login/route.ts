@@ -1,5 +1,5 @@
 import { ApiError, handle, ok, readJson } from '@/lib/http';
-import { supabaseAdmin, supabaseAnon } from '@/lib/supabase';
+import { isAuthUnavailable, supabaseAdmin, supabaseAnon } from '@/lib/supabase';
 import { loginSchema } from '@/lib/validation';
 import type { DbUser } from '@/lib/types';
 
@@ -19,6 +19,7 @@ export const POST = handle(async (req) => {
   ]);
   const { data, error } = signIn;
 
+  if (isAuthUnavailable(error)) throw new ApiError('UPSTREAM_ERROR', 'The sign-in service did not answer in time. Try again in a moment.');
   if (error || !data.session || !data.user) {
     throw new ApiError('UNAUTHORIZED', 'Invalid email or password.');
   }

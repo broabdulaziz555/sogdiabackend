@@ -20,6 +20,7 @@ export const dynamic = 'force-dynamic';
  * second one. The logic lives in lib/trading.ts (shared with server-side limit/stop fills).
  */
 export const POST = handle(async (req) => {
+  const t0 = Date.now();
   const body = openTradeSchema.parse(await readJson(req));
   const symbol = assertTradable(body.symbol);
 
@@ -41,5 +42,6 @@ export const POST = handle(async (req) => {
     prefetched,
   });
 
-  return ok({ order: r.position, replayed: r.replayed });
+  // server_ms: time spent inside this handler, so a slow open can be told apart from a slow network (shown in the terminal's Diagnostics)
+  return ok({ order: r.position, replayed: r.replayed, server_ms: Date.now() - t0 });
 });

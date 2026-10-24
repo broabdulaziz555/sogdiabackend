@@ -50,11 +50,29 @@ export function supabaseAdmin(): SupabaseClient {
   return cached;
 }
 
-/** Anon client — used only for sign-up / sign-in / token refresh. */
+/** Auth calls (sign-in / sign-up) must never hang: without a deadline Node waits ~5 minutes on a stalled connection. */
+export const AUTH_TIMEOUT_MS = 8_000;
+
+const authFetch: typeof fetch = (input, init) => {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), AUTH_TIMEOUT_MS);
+  const outer = init?.signal;
+  if (outer) { if (outer.aborted) ctl.abort(); else outer.addEventListener('abort', () => ctl.abort(), { once: true }); }
+  return fetch(input, { ...init, signal: ctl.signal }).finally(() => clearTimeout(timer));
+};
+
+/** Anon client — used only for sign-up / sign-in. (Token refresh calls the auth endpoint directly: see api/auth/refresh.) */
 export function supabaseAnon(): SupabaseClient {
   return createClient(
     requireEnv('NEXT_PUBLIC_SUPABASE_URL'),
     requireEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY'),
-    { auth: { autoRefreshToken: false, persistSession: false } },
+    { auth: { autoRefreshToken: false, persistSession: false }, global: { fetch: authFetch } },
   );
+}
+
+/** An auth error that says "the auth service did not answer" (timeout, network, 5xx, rate limit), not "wrong credentials". */
+export function isAuthUnavailable(error: { name?: string; status?: number } | null | undefined): boolean {
+  if (!error) return false;
+  const st = error.status ?? 0;
+  return error.name === 'AuthRetryableFetchError' || st === 0 || st >= 500 || st === 429;
 }

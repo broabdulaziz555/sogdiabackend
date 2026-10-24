@@ -97,14 +97,13 @@ export const RISK_ENGINE_ON = process.env.RISK_ENGINE !== 'off';
 if (!RISK_ENGINE_ON) console.warn('[risk] automatic risk engine is OFF (RISK_ENGINE=off): nobody is liquidated and no account can fail');
 
 /**
- * Simulation mode: drawdown is still measured and shown, but it no longer fails the account or flattens its
- * positions. Set ENFORCE_DRAWDOWN_BREACH=1 in the environment to bring the hard breach back.
+ * The ONLY automatic rule on an account: equity touching or crossing one of the two drawdown floors (daily or max)
+ * fails the account and closes its positions. Nothing is checked when a trade is opened, and nothing else limits the
+ * trader. Always enforced (no environment flag); RISK_ENGINE=off is the single test-only switch.
+ * Max DD is checked first.
  */
-const ENFORCE_BREACH = process.env.ENFORCE_DRAWDOWN_BREACH === '1';
-
-/** Which rule, if any, the account has just violated. Max DD is checked first. */
 export function checkBreach(metrics: AccountMetrics): BreachReason {
-  if (!RISK_ENGINE_ON || !ENFORCE_BREACH) return null;
+  if (!RISK_ENGINE_ON) return null;
   if (metrics.equity <= metrics.max_dd_limit) return 'MAX_DRAWDOWN';
   if (metrics.equity <= metrics.daily_dd_limit) return 'DAILY_DRAWDOWN';
   return null;

@@ -224,19 +224,51 @@ export interface EvaluationResult {
   liquidated: AutoClose[];
 }
 
+/** Start of the current UTC day: the daily drawdown floor rolls forward here. */
+function utcDayStart(now = new Date()): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
 /**
- * The heart of the risk engine. Runs on every positions poll, after a close, and on demand. Steps 1, 3 and 4 act only
- * unless RISK_ENGINE=off (see risk.ts); with the engine off this function just reads and computes.
- *   1. liquidate anything past its liquidation price
- *   2. recompute equity from live marks
- *   3. fail the account if a drawdown floor is breached (flattening positions)
- *   4. pass the account if the evaluation target is met
- *   5. persist the equity snapshot
+ * The daily floor is measured from the equity at 00:00 UTC. /api/cron/daily-reset moves it, but the first evaluation
+ * after midnight does it too, so the daily floor is never stale even if the cron is not scheduled. Same value the cron
+ * would store (the last persisted equity); the conditional update means whoever gets there first wins and the other is
+ * a no-op.
+ */
+function rollDailyStart(account: DbAccount): DbAccount {
+  if (account.status !== 'active') return account;
+  const dayStart = utcDayStart();
+  const last = new Date(account.daily_reset_at).getTime();
+  if (!Number.isFinite(last) || last >= dayStart.getTime()) return account;
+
+  const resetAt = new Date().toISOString();
+  const start = Number(account.equity);
+  void supabaseAdmin()
+    .from('accounts')
+    .update({ daily_start_balance: start, daily_reset_at: resetAt })
+    .eq('id', account.id)
+    .lt('daily_reset_at', dayStart.toISOString())
+    .then(
+      ({ error }) => { if (error) console.error('[engine] daily roll failed', error.message); },
+      (err: unknown) => console.error('[engine] daily roll failed', err),
+    );
+  return { ...account, daily_start_balance: start, daily_reset_at: resetAt };
+}
+
+/**
+ * The risk engine, reduced to what a B-book prop firm needs. Runs on the positions poll, after a close, on the cron
+ * tick and on demand. Nothing here runs when a trade is opened and nothing limits the trader on the way there.
+ *   1. close positions that hit their own liquidation price / stop-loss / take-profit (in memory, no extra query)
+ *   2. roll the daily floor at 00:00 UTC
+ *   3. equity from live marks; if it touches or crosses the daily or the max drawdown floor: close everything and set
+ *      the account to `failed` (it stays visible, read-only)
+ *   4. evaluation accounts that reached their profit target are marked `passed`
+ *   5. persist the equity figure
+ * RISK_ENGINE=off (tests only) turns 1, 3 and 4 into reads.
  */
 export async function evaluateAccount(input: DbAccount | string, preloadedOrders?: DbOrder[]): Promise<EvaluationResult> {
   let account = typeof input === 'string' ? await getAccount(input) : input;
 
-  // 1 — liquidation sweep (callers that already read the open orders pass them in, saving a database round trip)
   let orders = preloadedOrders ?? (await getOpenOrders(account.id));
   let positions = await buildPositions(orders);
   const liquidated = await sweepLiquidations(positions);
@@ -247,7 +279,8 @@ export async function evaluateAccount(input: DbAccount | string, preloadedOrders
     positions = await buildPositions(orders);
   }
 
-  // 2 — equity + rule check
+  account = rollDailyStart(account);
+
   let metrics = computeMetrics(account, positions);
   const reason = checkBreach(metrics);
   const risk: RiskResult = {
@@ -259,7 +292,7 @@ export async function evaluateAccount(input: DbAccount | string, preloadedOrders
 
   const terminal = account.status !== 'active';
 
-  // 3 — drawdown breach
+  // drawdown breach: the one rule
   if (reason && !terminal) {
     const flattened = await forceCloseAll(account.id, 'breach');
     account = await getAccount(account.id);
@@ -292,7 +325,7 @@ export async function evaluateAccount(input: DbAccount | string, preloadedOrders
     };
   }
 
-  // 4 — evaluation passed (One-Step only; Instant has no target)
+  // evaluation passed (accounts with a profit target only)
   if (RISK_ENGINE_ON && !terminal && metrics.target_reached && account.profit_target_pct !== null) {
     const { data, error } = await supabaseAdmin()
       .from('accounts')
@@ -320,7 +353,7 @@ export async function evaluateAccount(input: DbAccount | string, preloadedOrders
     };
   }
 
-  // 5 — persist the equity snapshot
+  // persist the equity figure
   account = persistEquity(account, metrics.equity);
   return { account, positions, metrics, risk: { ...risk, status: account.status }, liquidated };
 }

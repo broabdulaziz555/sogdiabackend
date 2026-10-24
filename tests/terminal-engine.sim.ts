@@ -14,6 +14,7 @@ const db: Record<string, any[]> = {
 let pendingEnabled = true;
 let binanceDown = false;
 let hangOrderInsert = false;
+let authMode: 'ok' | 'hang' | 'down' = 'ok';
 let prices: Record<string, number> = { BTCUSDT: 81500, PEPEUSDT: 0.0000044, ETHUSDT: 3200 };
 let nid = 0;
 
@@ -34,6 +35,9 @@ const j = (b: any, s = 200, h: any = {}) => new Response(JSON.stringify(b), { st
   const accept = new Headers(init.headers).get('accept') ?? '';
   if (url.host === 'sb.local') {
     if (url.pathname.startsWith('/auth/v1/user')) return j({ id: USER, aud: 'authenticated' });
+    if (url.pathname.startsWith('/auth/v1/token') && authMode === 'hang') await new Promise((_, rej) => init.signal?.addEventListener('abort', () => rej(Object.assign(new Error('The operation was aborted'), { name: 'AbortError' }))));
+    if (url.pathname.startsWith('/auth/v1/token') && authMode === 'down') return j({ msg: 'unavailable' }, 503);
+    if (url.pathname.startsWith('/auth/v1/token') && url.searchParams.get('grant_type') === 'refresh_token') { const b = JSON.parse(init.body); return b.refresh_token === 'good-refresh-token' ? j({ access_token: 'a2', refresh_token: 'rt2', expires_in: 3600, expires_at: 99, token_type: 'bearer' }) : j({ error: 'invalid_grant', error_description: 'Invalid Refresh Token: Refresh Token Not Found' }, 400); }
     if (url.pathname.startsWith('/auth/v1/token')) { const b = JSON.parse(init.body); return b.password === 'pw' ? j({ access_token: 'a', refresh_token: 'r', expires_in: 3600, expires_at: 1, token_type: 'bearer', user: { id: USER, email: 't@t' } }) : j({ error: 'invalid_grant', error_description: 'Invalid login credentials' }, 400); }
     if (url.pathname.startsWith('/rest/v1/rpc/close_position')) {
       const a = JSON.parse(init.body);
@@ -78,6 +82,7 @@ const call = async (mod: any, method: string, path: string, body?: any) => {
 };
 
 
+setInterval(() => {}, 1000); // AbortSignal.timeout timers are unref'd; a real server keeps the loop alive, the test must too
 let fails = 0;
 const check = (name: string, cond: boolean, extra?: any) => { console.log(cond ? 'ok  ' : 'FAIL', name, cond ? '' : JSON.stringify(extra)); if (!cond) fails++; };
 
@@ -215,6 +220,22 @@ const check = (name: string, cond: boolean, extra?: any) => { console.log(cond ?
   check('login returns the signed-in user\'s profile and a session', l1.ok && l1.data.user?.id === USER && l1.data.session.access_token === 'a', l1);
   check('wrong password: refused, no profile in the reply', !l2.ok && l2.error.code === 'UNAUTHORIZED' && !('user' in (l2.data ?? {})), l2);
 
+  // 9e2 token refresh: one attempt, hard deadline, and "auth service slow" is not "token rejected"
+  const refresh = await import('../src/app/api/auth/refresh/route');
+  const rf = (rt: string) => refresh.POST(new Request('http://x/api/auth/refresh', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ refresh_token: rt }) }), { params: {} }).then(async (r: Response) => ({ status: r.status, body: await r.json() }));
+  const rOk = await rf('good-refresh-token'), rBad = await rf('stale-refresh-token');
+  check('refresh: valid token -> new session', rOk.body.ok && rOk.body.data.session.access_token === 'a2' && rOk.body.data.session.refresh_token === 'rt2', rOk);
+  check('refresh: rejected token -> 401 UNAUTHORIZED (client signs out)', rBad.status === 401 && rBad.body.error.code === 'UNAUTHORIZED', rBad);
+  authMode = 'down'; const rDown = await rf('good-refresh-token');
+  check('refresh: auth service 503 -> 502 UPSTREAM_ERROR (client keeps the session)', rDown.status === 502 && rDown.body.error.code === 'UPSTREAM_ERROR', rDown);
+  authMode = 'hang'; const tr0 = Date.now(); const rHang = await rf('good-refresh-token'); const trMs = Date.now() - tr0;
+  check('refresh: auth service that never answers -> UPSTREAM_ERROR after ~8 s, not minutes', rHang.status === 502 && rHang.body.error.code === 'UPSTREAM_ERROR' && trMs >= 7500 && trMs < 10500, { trMs, rHang });
+  const login2 = await import('../src/app/api/auth/login/route');
+  const tl0 = Date.now();
+  const lHang = await login2.POST(new Request('http://x/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 't@t.io', password: 'pw' }) }), { params: {} }).then((r: Response) => r.json());
+  check('login: auth service that never answers -> UPSTREAM_ERROR after ~8 s (not "invalid password")', !lHang.ok && lHang.error.code === 'UPSTREAM_ERROR' && Date.now() - tl0 < 10500, lHang);
+  authMode = 'ok';
+
   // 9f a database insert that never answers is cut off after 5 s with an "outcome unknown" error, never a hang
   hangOrderInsert = true;
   const t5 = Date.now();
@@ -224,6 +245,68 @@ const check = (name: string, cond: boolean, extra?: any) => { console.log(cond ?
   check('hung insert: answered within ~5 s with UPSTREAM_ERROR (not stored, not a refusal)', !hung.ok && hung.error.code === 'UPSTREAM_ERROR' && took >= 4500 && took < 7500, { took, hung });
   const after = await O({ order_id: crypto.randomUUID(), symbol: 'ETHUSDT', side: 'long', leverage: 2, margin: 5 });
   check('the account lock was released: the next order goes straight through', after.ok, after);
+
+  // 9g the only automatic rule: equity touching or crossing the daily or max drawdown floor fails the account
+  {
+    const acc = db.accounts[0];
+    const today = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate())).toISOString();
+    const reset = (patch: any = {}) => {
+      db.orders = db.orders.filter((o) => o.account_id !== ACC);
+      Object.assign(acc, { status: 'active', balance: 10000, equity: 10000, daily_start_balance: 10000, daily_reset_at: today, breach_reason: null }, patch);
+    };
+    prices.BTCUSDT = 81500;
+
+    // far from nothing: an account 0.5% above its daily floor can still open a big trade (no per-trade drawdown gate)
+    reset({ balance: 9650, equity: 9650 });
+    const near = await O({ order_id: crypto.randomUUID(), symbol: 'BTCUSDT', side: 'long', leverage: 10, margin: 1000 });
+    check('0.5% above the daily floor: an order still opens (nothing is checked against drawdown on open)', near.ok, near);
+    const nearList = await list();
+    check('...and stays open and active while equity is above the floors', nearList.positions.length === 1 && acc.status === 'active', { n: nearList.positions.length, s: acc.status });
+
+    if (engineOn) {
+      // crossing: price falls until equity is under the daily floor (9600): positions closed, account failed, still readable
+      prices.BTCUSDT = 81500 * 0.985; await new Promise((r) => setTimeout(r, 1700)); // the price cache lives 1.5 s
+      const crossed = await list();
+      check('equity crossed the daily floor: account failed and positions closed by that poll', acc.status === 'failed' && crossed.positions.length === 0 && db.orders.filter((o) => o.account_id === ACC && o.status === 'open').length === 0 && crossed.risk.breached && crossed.risk.reason === 'DAILY_DRAWDOWN', { s: acc.status, risk: crossed.risk });
+      check('breach reason stored on the account', /daily/i.test(acc.breach_reason ?? ''), acc.breach_reason);
+      const viewed = await list();
+      check('a failed account is still served (viewable), with its status', viewed.account.status === 'failed' && Array.isArray(viewed.positions), viewed.account);
+      const blocked = await O({ order_id: crypto.randomUUID(), symbol: 'BTCUSDT', side: 'long', leverage: 2, margin: 10 });
+      check('a failed account cannot open', !blocked.ok && blocked.error.code === 'ACCOUNT_NOT_TRADABLE', blocked);
+      const history = db.orders.filter((o) => o.account_id === ACC);
+      check('the trades it made are kept (closed, not deleted)', history.length === 1 && history[0].status !== 'open', history);
+
+      // touching counts: equity exactly on the floor, no positions at all
+      prices.BTCUSDT = 81500;
+      reset({ balance: 9600, equity: 9600 });
+      await list();
+      check('equity exactly on the daily floor (touch) fails the account', acc.status === 'failed' && /daily/i.test(acc.breach_reason ?? ''), { s: acc.status, r: acc.breach_reason });
+      reset({ balance: 9400.0, equity: 9400.0, daily_start_balance: 9400 });
+      await list();
+      check('equity exactly on the max floor (touch) fails the account', acc.status === 'failed' && /max/i.test(acc.breach_reason ?? ''), { s: acc.status, r: acc.breach_reason });
+
+      // one cent above both floors: nothing happens
+      reset({ balance: 9600.01, equity: 9600.01 });
+      await list();
+      check('one cent above the floor: still active', acc.status === 'active', acc.status);
+
+      // daily floor rolls at 00:00 UTC even if the cron never ran: yesterday's 10000 start must not fail a 9500 account
+      reset({ balance: 9500, equity: 9500, daily_reset_at: new Date(Date.parse(today) - 3600_000).toISOString() });
+      const rolled = await list();
+      await new Promise((r) => setTimeout(r, 100));
+      check('stale daily start (cron did not run): rolled to current equity instead of failing the account', acc.status === 'active' && acc.daily_start_balance === 9500 && Date.parse(acc.daily_reset_at) >= Date.parse(today) && rolled.metrics.daily_dd_limit === 9120, { s: acc.status, start: acc.daily_start_balance, m: rolled.metrics.daily_dd_limit });
+      reset({ balance: 9500, equity: 9500, daily_start_balance: 10000 });
+      await list();
+      check('...but the same account with a start set today (not stale) does fail', acc.status === 'failed', acc.status);
+    } else {
+      prices.BTCUSDT = 81500 * 0.9; await new Promise((r) => setTimeout(r, 1700));
+      const off = await list();
+      check('RISK_ENGINE=off: crossing a floor changes nothing', acc.status === 'active' && off.positions.length === 1, acc.status);
+    }
+    prices.BTCUSDT = 81500; await new Promise((r) => setTimeout(r, 1700));
+    reset();
+    await O({ order_id: crypto.randomUUID(), symbol: 'ETHUSDT', side: 'long', leverage: 2, margin: 10 }); // the cron tick below needs an account with a position
+  }
 
   // 10 cron tick
   db.orders = db.orders.filter((o) => o.account_id !== 'other');
