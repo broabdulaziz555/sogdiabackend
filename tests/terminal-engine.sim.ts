@@ -191,12 +191,12 @@ const check = (name: string, cond: boolean, extra?: any) => { console.log(cond ?
   check('open succeeded and did not sweep (doomed position still open right after)', oo.ok && db.orders.find((o) => o.id === doomed.id)!.status === 'open', db.orders.find((o) => o.id === doomed.id)?.status);
   const statusesBefore = JSON.stringify(db.orders.map((o) => [o.id, o.status]));
   const polled = await list();
-  const engineOn = process.env.RISK_ENGINE === 'on';
+  const engineOn = process.env.RISK_ENGINE !== 'off';
   if (engineOn) {
-    check('RISK_ENGINE=on: the next positions poll liquidates it', db.orders.find((o) => o.id === doomed.id)!.status !== 'open', db.orders.find((o) => o.id === doomed.id)?.status);
+    check('engine on (default): the next positions poll liquidates it', db.orders.find((o) => o.id === doomed.id)!.status !== 'open', db.orders.find((o) => o.id === doomed.id)?.status);
   } else {
-    check('RISK_ENGINE off: polling leaves a position past its liquidation price OPEN and lists it', db.orders.find((o) => o.id === doomed.id)!.status === 'open' && polled.positions.some((p: any) => p.id === doomed.id), db.orders.find((o) => o.id === doomed.id)?.status);
-    check('RISK_ENGINE off: a poll changes no order status at all', JSON.stringify(db.orders.map((o) => [o.id, o.status])) === statusesBefore && polled.liquidated.length === 0 && polled.debug.risk_engine === 'off');
+    check('RISK_ENGINE=off: polling leaves a position past its liquidation price OPEN and lists it', db.orders.find((o) => o.id === doomed.id)!.status === 'open' && polled.positions.some((p: any) => p.id === doomed.id), db.orders.find((o) => o.id === doomed.id)?.status);
+    check('RISK_ENGINE=off: a poll changes no order status at all', JSON.stringify(db.orders.map((o) => [o.id, o.status])) === statusesBefore && polled.liquidated.length === 0 && polled.debug.risk_engine === 'off');
     db.orders = db.orders.filter((o) => o.id !== doomed.id);
   }
 

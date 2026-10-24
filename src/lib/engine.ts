@@ -226,7 +226,7 @@ export interface EvaluationResult {
 
 /**
  * The heart of the risk engine. Runs on every positions poll, after a close, and on demand. Steps 1, 3 and 4 act only
- * when RISK_ENGINE=on (see risk.ts); with the engine off this function just reads and computes.
+ * unless RISK_ENGINE=off (see risk.ts); with the engine off this function just reads and computes.
  *   1. liquidate anything past its liquidation price
  *   2. recompute equity from live marks
  *   3. fail the account if a drawdown floor is breached (flattening positions)

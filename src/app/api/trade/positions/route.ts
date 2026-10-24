@@ -13,10 +13,9 @@ export const dynamic = 'force-dynamic';
  * GET /api/trade/positions?account_id=uuid
  * The terminal snapshot: open positions with live PnL, working limit/stop orders, account figures.
  *
- * READ-ONLY for positions while the risk engine is off (the default, see RISK_ENGINE in lib/risk.ts): nothing here
- * liquidates, stops out, takes profit or flattens, and no order status is ever written. The only writes left in the
- * cycle are the opening of limit/stop orders the market has reached, and the account's equity figure.
- * With RISK_ENGINE=on, each call also runs the liquidation / SL / TP / drawdown checks.
+ * Each call also runs the risk engine (liquidation / SL / TP / drawdown checks, see lib/risk.ts). With RISK_ENGINE=off
+ * the route is read-only: no order status is written. The writes left then are the opening of limit/stop orders the
+ * market has reached, and the account's equity figure.
  */
 export const GET = handle(async (req) => {
   const user = await requireUser(req);

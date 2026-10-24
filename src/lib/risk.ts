@@ -89,12 +89,12 @@ export function computeMetrics(account: DbAccount, positions: Position[]): Accou
 
 /**
  * MASTER SWITCH for everything that changes an account or a position by itself: liquidations, stop-loss, take-profit,
- * drawdown breaches (flattening) and the evaluation pass. It is OFF unless RISK_ENGINE=on is set in the environment.
- * While it is off, polling only READS: no order and no account status is ever modified by the engine. Equity is still
- * computed and shown; manual closes and admin actions still work.
+ * drawdown breaches (flattening) and the evaluation pass. ON by default; RISK_ENGINE=off in the environment disables
+ * it (testing only). While it is off, polling only READS: no order and no account status is ever modified by the
+ * engine, so nobody is liquidated and no account can fail. Manual closes and admin actions work either way.
  */
-export const RISK_ENGINE_ON = process.env.RISK_ENGINE === 'on';
-if (!RISK_ENGINE_ON) console.warn('[risk] automatic risk engine is OFF (set RISK_ENGINE=on to enable liquidations, SL/TP and drawdown breaches)');
+export const RISK_ENGINE_ON = process.env.RISK_ENGINE !== 'off';
+if (!RISK_ENGINE_ON) console.warn('[risk] automatic risk engine is OFF (RISK_ENGINE=off): nobody is liquidated and no account can fail');
 
 /**
  * Simulation mode: drawdown is still measured and shown, but it no longer fails the account or flattens its
