@@ -7,6 +7,7 @@ import { rateLimit } from '@/lib/ratelimit';
 import { pendingSchema } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /**
  * POST /api/trade/pending — place a limit or stop order that lives on the server (survives a closed tab).

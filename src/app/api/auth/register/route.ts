@@ -6,6 +6,7 @@ import { clientIp, rateLimit } from '@/lib/ratelimit';
 import type { DbUser } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /** POST /api/auth/register */
 export const POST = handle(async (req) => {

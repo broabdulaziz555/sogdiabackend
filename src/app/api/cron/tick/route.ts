@@ -5,6 +5,7 @@ import { getAccount } from '@/lib/engine';
 import { runCycle } from '@/lib/cycle';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 export const maxDuration = 120;
 
 /**

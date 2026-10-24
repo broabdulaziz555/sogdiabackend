@@ -5,6 +5,7 @@ import { getAccount } from '@/lib/engine';
 import { audit } from '@/lib/audit';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /**
  * DELETE /api/xdepartment/accounts/{id}

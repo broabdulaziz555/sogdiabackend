@@ -4,6 +4,7 @@ import { getSettings } from '@/lib/settings';
 import { money } from '@/lib/math';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /**
  * GET /api/pricing

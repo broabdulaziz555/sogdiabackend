@@ -5,6 +5,7 @@ import { money } from '@/lib/math';
 import type { AccountStatus } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /**
  * GET /api/admin/stats — operations dashboard.

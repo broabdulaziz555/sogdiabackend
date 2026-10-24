@@ -8,6 +8,7 @@ import { accountIdSchema } from '@/lib/validation';
 import { RISK_ENGINE_ON } from '@/lib/risk';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /**
  * GET /api/trade/positions?account_id=uuid

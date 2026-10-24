@@ -5,6 +5,7 @@ import { serializeAccount } from '@/lib/accounts';
 import type { AccountStatus, DbAccount } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /** GET /api/accounts?status=active */
 export const GET = handle(async (req) => {

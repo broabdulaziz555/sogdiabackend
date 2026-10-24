@@ -7,6 +7,7 @@ import { adminKycSchema } from '@/lib/validation';
 import type { DbUser } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /** POST /api/admin/kyc/{userId} — approve or reject a KYC submission. */
 export const POST = handle(async (req: Request, ctx: { params: { userId: string } }) => {

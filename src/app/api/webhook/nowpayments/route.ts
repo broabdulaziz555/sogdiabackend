@@ -8,6 +8,7 @@ import { creditReferral } from '@/lib/referrals';
 import type { DbTransaction } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 interface IpnPayload {
   payment_id?: string | number;

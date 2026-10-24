@@ -5,6 +5,7 @@ import { SPREAD_BPS } from '@/config/pricing';
 import { TOP_50_USDT_PAIRS } from '@/config/symbols';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /** GET /api/market/prices?symbols=BTCUSDT,ETHUSDT */
 export const GET = handle(async (req) => {

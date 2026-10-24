@@ -9,6 +9,7 @@ import { giftAccountSchema } from '@/lib/validation';
 import type { DbAccount, DbUser } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /**
  * POST /api/xdepartment/accounts/gift

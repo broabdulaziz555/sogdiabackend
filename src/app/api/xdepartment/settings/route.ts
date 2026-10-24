@@ -6,6 +6,7 @@ import { audit } from '@/lib/audit';
 import { settingsSchema } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /**
  * GET /api/xdepartment/settings

@@ -26,7 +26,7 @@ const timedFetch: typeof fetch = async (input, init) => {
     const timer = setTimeout(() => ctl.abort(), method === 'GET' || method === 'HEAD' ? DB_TIMEOUT_MS : DB_WRITE_TIMEOUT_MS);
     const outer = init?.signal;
     if (outer) { if (outer.aborted) ctl.abort(); else outer.addEventListener('abort', () => ctl.abort(), { once: true }); }
-    return fetch(input, { ...init, signal: ctl.signal }).finally(() => clearTimeout(timer));
+    return fetch(input, { ...init, signal: ctl.signal, cache: 'no-store' }).finally(() => clearTimeout(timer)); // never the Next.js data cache
   };
   try {
     const res = await attempt();
@@ -58,7 +58,7 @@ const authFetch: typeof fetch = (input, init) => {
   const timer = setTimeout(() => ctl.abort(), AUTH_TIMEOUT_MS);
   const outer = init?.signal;
   if (outer) { if (outer.aborted) ctl.abort(); else outer.addEventListener('abort', () => ctl.abort(), { once: true }); }
-  return fetch(input, { ...init, signal: ctl.signal }).finally(() => clearTimeout(timer));
+  return fetch(input, { ...init, signal: ctl.signal, cache: 'no-store' }).finally(() => clearTimeout(timer));
 };
 
 /** Anon client — used only for sign-up / sign-in. (Token refresh calls the auth endpoint directly: see api/auth/refresh.) */

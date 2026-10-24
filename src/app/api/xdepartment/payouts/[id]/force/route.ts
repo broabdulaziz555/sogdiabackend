@@ -8,6 +8,7 @@ import { forcePayoutSchema } from '@/lib/validation';
 import type { DbTransaction } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /**
  * POST /api/xdepartment/payouts/{id}/force

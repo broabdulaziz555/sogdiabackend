@@ -10,6 +10,7 @@ import { adminPayoutSchema } from '@/lib/validation';
 import type { DbTransaction, TransactionStatus } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /**
  * POST /api/admin/payouts/{id}

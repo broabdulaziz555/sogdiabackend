@@ -7,6 +7,7 @@ import { promoUpdateSchema } from '@/lib/validation';
 import type { Promo } from '@/config/settings';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 async function load(code: string): Promise<Promo> {
   const promo = await findPromo(code);

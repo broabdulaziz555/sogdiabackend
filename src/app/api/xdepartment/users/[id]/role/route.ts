@@ -7,6 +7,7 @@ import { setRoleSchema } from '@/lib/validation';
 import type { DbUser } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /**
  * POST /api/xdepartment/users/{id}/role

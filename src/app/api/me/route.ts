@@ -5,6 +5,7 @@ import { updateMeSchema } from '@/lib/validation';
 import type { DbUser } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 function publicUser(u: DbUser) {
   return {

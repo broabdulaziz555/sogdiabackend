@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { paginationSchema } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /** GET /api/xdepartment/audit?actor_id=&action=&target_id=&limit=&offset= */
 export const GET = handle(async (req) => {

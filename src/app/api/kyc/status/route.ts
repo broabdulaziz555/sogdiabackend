@@ -2,6 +2,7 @@ import { handle, ok } from '@/lib/http';
 import { requireUser } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /** GET /api/kyc/status */
 export const GET = handle(async (req) => {

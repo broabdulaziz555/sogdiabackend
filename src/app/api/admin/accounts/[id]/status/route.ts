@@ -9,6 +9,7 @@ import { adminAccountStatusSchema } from '@/lib/validation';
 import type { AccountStatus, DbAccount } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 const NEXT_STATUS: Record<string, AccountStatus> = {
   freeze: 'frozen',

@@ -5,6 +5,7 @@ import { serializeAccount } from '@/lib/accounts';
 import { accountIdSchema } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /** POST /api/risk/evaluate */
 export const POST = handle(async (req) => {

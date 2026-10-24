@@ -10,6 +10,7 @@ import { rateLimit } from '@/lib/ratelimit';
 import type { DbTransaction } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /**
  * POST /api/checkout

@@ -5,6 +5,7 @@ import type { DbOrder } from '@/lib/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 const BRAND = '#00E08F';
 const LOSS = '#FF4D6D';

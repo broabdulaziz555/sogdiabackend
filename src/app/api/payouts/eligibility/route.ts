@@ -5,6 +5,7 @@ import { evaluatePayoutEligibility, getTradingStats } from '@/lib/payouts';
 import { accountIdSchema } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /** GET /api/payouts/eligibility?account_id=uuid */
 export const GET = handle(async (req) => {

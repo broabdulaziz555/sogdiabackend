@@ -9,6 +9,7 @@ import { partialCloseSchema } from '@/lib/validation';
 import type { DbOrder } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /**
  * POST /api/trade/partial-close

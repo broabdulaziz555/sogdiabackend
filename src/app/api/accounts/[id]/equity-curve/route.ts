@@ -3,6 +3,7 @@ import { requireAccount, requireUser } from '@/lib/auth';
 import { getEquityCurve } from '@/lib/snapshots';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /** GET /api/accounts/{id}/equity-curve?limit=500 */
 export const GET = handle(async (req: Request, ctx: { params: { id: string } }) => {

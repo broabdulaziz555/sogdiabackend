@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { rateLimit } from '@/lib/ratelimit';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 const BUCKET = 'kyc-documents';
 const MAX_BYTES = 5 * 1024 * 1024;

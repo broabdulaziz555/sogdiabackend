@@ -6,6 +6,7 @@ import { openTradeSchema } from '@/lib/validation';
 import { rateLimit } from '@/lib/ratelimit';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /**
  * POST /api/trade/open

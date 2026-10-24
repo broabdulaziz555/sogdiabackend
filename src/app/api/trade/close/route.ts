@@ -11,6 +11,7 @@ import { closeTradeSchema } from '@/lib/validation';
 import type { DbOrder } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /** POST /api/trade/close */
 export const POST = handle(async (req) => {

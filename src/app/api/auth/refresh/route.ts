@@ -3,6 +3,7 @@ import { AUTH_TIMEOUT_MS } from '@/lib/supabase';
 import { refreshSchema } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /**
  * POST /api/auth/refresh

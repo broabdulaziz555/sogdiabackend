@@ -3,6 +3,7 @@ import { requireStaff } from '@/lib/permissions';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 const BUCKET = 'kyc-documents';
 const SIGNED_URL_TTL = 3600; // 1 h; the admin screen requests a fresh link every time a submission is opened and renews it before it lapses

@@ -6,6 +6,7 @@ import { paginationSchema } from '@/lib/validation';
 import type { AccountStatus, DbAccount } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /** GET /api/admin/accounts?status=&user_id=&limit=&offset= */
 export const GET = handle(async (req) => {

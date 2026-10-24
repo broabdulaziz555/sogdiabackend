@@ -6,6 +6,7 @@ import { accountIdSchema, paginationSchema } from '@/lib/validation';
 import type { DbOrder, OrderStatus } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /** GET /api/trade/history?account_id=uuid&limit=50&offset=0&status=closed */
 export const GET = handle(async (req) => {

@@ -8,6 +8,7 @@ import { adminCertificateSchema, paginationSchema } from '@/lib/validation';
 import type { DbCertificate } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /** GET /api/admin/certificates?user_id=&type=&limit=&offset= */
 export const GET = handle(async (req) => {

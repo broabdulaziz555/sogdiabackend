@@ -3,6 +3,7 @@ import { requireUser } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /**
  * GET /api/checkout/status?order=SOGDIA-xxxxxxxx

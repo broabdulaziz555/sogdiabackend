@@ -4,6 +4,7 @@ import { getPlan } from '@/config/pricing';
 import { checkPromo, promoRejectionMessage, quoteCheckout } from '@/lib/promos';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /**
  * GET /api/promos/validate?code=WELCOME10&plan_key=one_step_10k

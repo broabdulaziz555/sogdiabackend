@@ -5,6 +5,7 @@ import { certificateImageUrl } from '@/lib/certificates';
 import type { DbCertificate } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /** GET /api/certificates?account_id=uuid */
 export const GET = handle(async (req) => {
