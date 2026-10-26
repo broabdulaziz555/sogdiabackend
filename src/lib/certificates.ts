@@ -11,6 +11,8 @@ export interface IssueCertificateInput {
   is_manual?: boolean;
   issued_by?: string | null;
   metadata?: Record<string, unknown>;
+  /** Backdate a manual certificate; defaults to now. */
+  issued_at?: string | null;
 }
 
 export async function issueCertificate(input: IssueCertificateInput): Promise<DbCertificate> {
@@ -37,6 +39,7 @@ export async function issueCertificate(input: IssueCertificateInput): Promise<Db
       is_manual: input.is_manual ?? false,
       issued_by: input.issued_by ?? null,
       metadata: input.metadata ?? {},
+      ...(input.issued_at ? { issued_at: input.issued_at } : {}),
     })
     .select('*')
     .single<DbCertificate>();

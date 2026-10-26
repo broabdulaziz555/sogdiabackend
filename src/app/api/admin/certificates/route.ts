@@ -3,6 +3,7 @@ import { requireStaff } from '@/lib/permissions';
 import { supabaseAdmin } from '@/lib/supabase';
 import { certificateImageUrl, issueCertificate } from '@/lib/certificates';
 import { audit } from '@/lib/audit';
+import { resolveCertificateCopy } from '@/lib/certificateCopy';
 import { notify } from '@/lib/notifications';
 import { adminCertificateSchema, paginationSchema } from '@/lib/validation';
 import type { DbCertificate } from '@/lib/types';
@@ -61,24 +62,34 @@ export const POST = handle(async (req) => {
     display_name: body.display_name,
     is_manual: true,
     issued_by: staff.id,
-    metadata: { issued_via: 'admin_panel' },
+    issued_at: body.issued_at ?? null,
+    metadata: {
+      issued_via: 'admin_panel',
+      ...(body.title ? { title: body.title } : {}),
+      ...(body.caption ? { caption: body.caption } : {}),
+      ...(body.amount_label ? { amount_label: body.amount_label } : {}),
+      ...(body.hide_amount ? { hide_amount: true } : {}),
+    },
   });
 
   await audit(
     staff,
     'certificate.manual',
     { type: 'certificate', id: certificate.id },
-    { user_id: body.user_id, type: body.type, amount: body.amount },
+    { user_id: body.user_id, type: body.type, amount: body.amount, title: body.title ?? null, issued_at: body.issued_at ?? null },
     req,
   );
 
-  await notify(
-    body.user_id,
-    'certificate_issued',
-    'New certificate issued',
-    `A ${body.type === 'payout' ? 'payout' : 'evaluation'} certificate has been added to your profile.`,
-    { certificate_id: certificate.id },
-  );
+  if (body.notify !== false) {
+    const label = resolveCertificateCopy(body.type, certificate.metadata).label.toLowerCase();
+    await notify(
+      body.user_id,
+      'certificate_issued',
+      'New certificate issued',
+      `A ${label} certificate has been added to your profile.`,
+      { certificate_id: certificate.id },
+    );
+  }
 
   return ok({
     certificate: { ...certificate, amount: Number(certificate.amount) },

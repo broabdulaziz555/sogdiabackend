@@ -7,7 +7,7 @@ export type OrderSide = 'long' | 'short';
 export type OrderStatus = 'open' | 'closed' | 'liquidated';
 export type TransactionType = 'purchase' | 'payout' | 'refund' | 'adjustment' | 'commission';
 export type TransactionStatus = 'pending' | 'approved' | 'paid' | 'rejected' | 'failed';
-export type CertificateType = 'eval_pass' | 'payout';
+export type CertificateType = 'eval_pass' | 'payout' | 'phase1_pass' | 'phase2_pass' | 'funded' | 'achievement' | 'custom';
 
 export interface DbUser {
   id: string;

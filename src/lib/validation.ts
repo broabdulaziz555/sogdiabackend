@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CERTIFICATE_TYPES } from '@/lib/certificateCopy';
 import { MAX_LEVERAGE, MIN_LEVERAGE, PLAN_KEYS } from '@/config/pricing';
 
 /** Email + password, 8–16 chars, at least one letter and one digit. */
@@ -160,9 +161,16 @@ export const adminPayoutSchema = z.object({
 export const adminCertificateSchema = z.object({
   user_id: z.string().uuid(),
   account_id: z.string().uuid().nullable().optional(),
-  type: z.enum(['eval_pass', 'payout']),
+  type: z.enum(CERTIFICATE_TYPES),
   amount: z.number().nonnegative().max(10_000_000),
   display_name: z.string().trim().min(2).max(80).optional(),
+  // certificate builder overrides (all optional; the type's default wording is used otherwise)
+  title: z.string().trim().max(60).optional(),
+  caption: z.string().trim().max(200).optional(),
+  amount_label: z.string().trim().max(30).optional(),
+  hide_amount: z.boolean().optional(),
+  issued_at: z.string().datetime({ offset: true }).optional(),
+  notify: z.boolean().optional(),
 });
 
 // ---------------------------------------------------------------------

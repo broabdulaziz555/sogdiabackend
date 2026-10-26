@@ -1,4 +1,5 @@
 import { ApiError } from '@/lib/http';
+import { snapshotEquity } from '@/lib/snapshots';
 import { supabaseAdmin } from '@/lib/supabase';
 import { getPrices } from '@/lib/binance';
 import {
@@ -282,6 +283,8 @@ export async function evaluateAccount(input: DbAccount | string, preloadedOrders
   account = rollDailyStart(account);
 
   let metrics = computeMetrics(account, positions);
+  // TP / SL / liquidation closes change the balance too — record them on the equity curve like a manual close.
+  if (liquidated.length > 0) void snapshotEquity(account.id, metrics.equity, Number(account.balance), 'trade_close');
   const reason = checkBreach(metrics);
   const risk: RiskResult = {
     breached: false,
@@ -310,6 +313,7 @@ export async function evaluateAccount(input: DbAccount | string, preloadedOrders
       .select('*')
       .single<DbAccount>();
     if (error) throw new ApiError('INTERNAL_ERROR', error.message);
+    if (flattened > 0) void snapshotEquity(account.id, metrics.equity, Number(account.balance), 'trade_close');
 
     return {
       account: data,

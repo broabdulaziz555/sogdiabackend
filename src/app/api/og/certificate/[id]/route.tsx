@@ -1,6 +1,7 @@
 import { ImageResponse } from 'next/og';
 import { supabaseAdmin } from '@/lib/supabase';
 import type { DbCertificate } from '@/lib/types';
+import { resolveCertificateCopy } from '@/lib/certificateCopy';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -37,10 +38,7 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
   }
 
   const isPayout = data.type === 'payout';
-  const title = isPayout ? 'CERTIFICATE OF PAYOUT' : 'CERTIFICATE OF ACHIEVEMENT';
-  const caption = isPayout
-    ? 'has successfully withdrawn profits from a SOGDIA funded account'
-    : 'has successfully passed the SOGDIA evaluation and earned a funded account';
+  const { title, caption, amountLabel, hideAmount } = resolveCertificateCopy(data.type, data.metadata);
 
   const issued = new Date(data.issued_at).toLocaleDateString('en-US', {
     year: 'numeric', month: 'long', day: 'numeric',
@@ -90,14 +88,16 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
           </div>
 
           <div style={{ display: 'flex', gap: 80, marginTop: 44 }}>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-              <div style={{ fontSize: 18, color: '#6E7D8C', letterSpacing: 2 }}>
-                {isPayout ? 'AMOUNT PAID' : 'ACCOUNT SIZE'}
+            {!hideAmount && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <div style={{ fontSize: 18, color: '#6E7D8C', letterSpacing: 2 }}>
+                  {amountLabel}
+                </div>
+                <div style={{ fontSize: 56, fontWeight: 700, color: BRAND, marginTop: 8 }}>
+                  {fmtUsd(Number(data.amount))}
+                </div>
               </div>
-              <div style={{ fontSize: 56, fontWeight: 700, color: BRAND, marginTop: 8 }}>
-                {fmtUsd(Number(data.amount))}
-              </div>
-            </div>
+            )}
             {accountSize !== null && isPayout && (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                 <div style={{ fontSize: 18, color: '#6E7D8C', letterSpacing: 2 }}>ACCOUNT</div>
