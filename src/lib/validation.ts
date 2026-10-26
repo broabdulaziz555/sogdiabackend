@@ -173,6 +173,19 @@ export const adminCertificateSchema = z.object({
   notify: z.boolean().optional(),
 });
 
+/** Builder preview: everything the certificate shows, nothing is saved. */
+export const certificatePreviewSchema = z.object({
+  account_id: z.string().uuid().nullable().optional(),
+  type: z.enum(CERTIFICATE_TYPES),
+  amount: z.number().nonnegative().max(10_000_000).nullable().optional(),
+  display_name: z.string().trim().max(80).optional(),
+  title: z.string().trim().max(60).optional(),
+  caption: z.string().trim().max(200).optional(),
+  amount_label: z.string().trim().max(30).optional(),
+  hide_amount: z.boolean().optional(),
+  issued_at: z.string().datetime({ offset: true }).optional(),
+});
+
 // ---------------------------------------------------------------------
 // X-Department (unrestricted tier)
 // ---------------------------------------------------------------------

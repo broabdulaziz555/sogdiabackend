@@ -22,7 +22,8 @@ export const GET = handle(async (req) => {
 
   let query = supabaseAdmin()
     .from('certificates')
-    .select('*, users(email, full_name)', { count: 'exact' })
+    // two links to users (user_id = recipient, issued_by = staff): embed the recipient explicitly
+    .select('*, users!user_id(email, full_name)', { count: 'exact' })
     .order('issued_at', { ascending: false })
     .range(offset, offset + limit - 1);
 
