@@ -10,7 +10,8 @@
     "test": "node tests/margin-validation.test.mjs && node tests/promo-limits.test.mjs",
     "lint": "next lint",
     "test:cache": "node tests/prod-cache.e2e.mjs",
-    "test:sim": "npx tsx tests/terminal-engine.sim.ts && RISK_ENGINE=off npx tsx tests/terminal-engine.sim.ts"
+    "test:sim": "npx tsx tests/terminal-engine.sim.ts && RISK_ENGINE=off npx tsx tests/terminal-engine.sim.ts",
+    "test:og": "npx tsx --tsconfig tests/tsconfig.render.json tests/certificate-image.render.tsx /tmp"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
