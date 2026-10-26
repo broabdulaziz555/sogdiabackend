@@ -2,6 +2,7 @@ import { ApiError, handle, ok } from '@/lib/http';
 import { requireUser } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase';
 import { certificateImageUrl } from '@/lib/certificates';
+import { effectiveType } from '@/lib/certificateCopy';
 import type { DbCertificate } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -26,6 +27,7 @@ export const GET = handle(async (req) => {
   return ok({
     certificates: ((data ?? []) as DbCertificate[]).map((c) => ({
       ...c,
+      type: effectiveType(c),
       amount: Number(c.amount),
       image_url: certificateImageUrl(c.id),
     })),

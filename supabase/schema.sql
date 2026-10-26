@@ -49,7 +49,7 @@ do $$ begin
 exception when duplicate_object then null; end $$;
 
 do $$ begin
-  create type certificate_type as enum ('eval_pass', 'payout', 'phase1_pass', 'phase2_pass', 'funded', 'achievement', 'custom');
+  create type certificate_type as enum ('eval_pass', 'payout');
 exception when duplicate_object then null; end $$;
 
 -- =====================================================================

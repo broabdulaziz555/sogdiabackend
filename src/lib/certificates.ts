@@ -1,6 +1,7 @@
 import { ApiError } from '@/lib/http';
 import { supabaseAdmin } from '@/lib/supabase';
 import type { CertificateType, DbCertificate } from '@/lib/types';
+import { storageType } from '@/lib/certificateCopy';
 
 export interface IssueCertificateInput {
   user_id: string;
@@ -28,24 +29,25 @@ export async function issueCertificate(input: IssueCertificateInput): Promise<Db
     displayName = user?.full_name ?? user?.email?.split('@')[0] ?? 'SOGDIA Trader';
   }
 
+  const { dbType, kind } = storageType(input.type);
   const { data, error } = await admin
     .from('certificates')
     .insert({
       user_id: input.user_id,
       account_id: input.account_id ?? null,
-      type: input.type,
+      type: dbType,
       amount: input.amount,
       display_name: displayName,
       is_manual: input.is_manual ?? false,
       issued_by: input.issued_by ?? null,
-      metadata: input.metadata ?? {},
+      metadata: { ...(input.metadata ?? {}), ...(kind ? { kind } : {}) },
       ...(input.issued_at ? { issued_at: input.issued_at } : {}),
     })
     .select('*')
     .single<DbCertificate>();
 
   if (error) throw new ApiError('INTERNAL_ERROR', error.message);
-  return data;
+  return { ...data, type: input.type };
 }
 
 export function certificateImageUrl(id: string): string {

@@ -1,7 +1,7 @@
 import { ImageResponse } from 'next/og';
 import { supabaseAdmin } from '@/lib/supabase';
 import type { DbCertificate } from '@/lib/types';
-import { resolveCertificateCopy } from '@/lib/certificateCopy';
+import { effectiveType, resolveCertificateCopy } from '@/lib/certificateCopy';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -37,8 +37,9 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
     );
   }
 
-  const isPayout = data.type === 'payout';
-  const { title, caption, amountLabel, hideAmount } = resolveCertificateCopy(data.type, data.metadata);
+  const type = effectiveType(data);
+  const isPayout = type === 'payout';
+  const { title, caption, amountLabel, hideAmount } = resolveCertificateCopy(type, data.metadata);
 
   const issued = new Date(data.issued_at).toLocaleDateString('en-US', {
     year: 'numeric', month: 'long', day: 'numeric',

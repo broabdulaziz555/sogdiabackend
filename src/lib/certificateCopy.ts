@@ -72,3 +72,18 @@ export function resolveCertificateCopy(type: string, metadata: Record<string, un
     hideAmount: m.hide_amount === true,
   };
 }
+
+/** The two values the database enum has always had. Other types are stored as one of these + `metadata.kind`. */
+const DB_TYPES = new Set(['eval_pass', 'payout']);
+
+/** Column value + metadata to store for a certificate type, so new types need no database migration. */
+export function storageType(type: CertificateType): { dbType: 'eval_pass' | 'payout'; kind: CertificateType | null } {
+  if (DB_TYPES.has(type)) return { dbType: type as 'eval_pass' | 'payout', kind: null };
+  return { dbType: 'eval_pass', kind: type };
+}
+
+/** The certificate's real type: `metadata.kind` when set, else the column value. */
+export function effectiveType(c: { type: string; metadata?: Record<string, unknown> | null }): string {
+  const k = c.metadata?.kind;
+  return typeof k === 'string' && k in CERTIFICATE_COPY ? k : c.type;
+}

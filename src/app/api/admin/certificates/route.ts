@@ -3,7 +3,7 @@ import { requireStaff } from '@/lib/permissions';
 import { supabaseAdmin } from '@/lib/supabase';
 import { certificateImageUrl, issueCertificate } from '@/lib/certificates';
 import { audit } from '@/lib/audit';
-import { resolveCertificateCopy } from '@/lib/certificateCopy';
+import { effectiveType, resolveCertificateCopy } from '@/lib/certificateCopy';
 import { notify } from '@/lib/notifications';
 import { adminCertificateSchema, paginationSchema } from '@/lib/validation';
 import type { DbCertificate } from '@/lib/types';
@@ -29,7 +29,8 @@ export const GET = handle(async (req) => {
   const userId = url.searchParams.get('user_id');
   const type = url.searchParams.get('type');
   if (userId) query = query.eq('user_id', userId);
-  if (type) query = query.eq('type', type);
+  if (type === 'eval_pass' || type === 'payout') query = query.eq('type', type).is('metadata->kind', null);
+  else if (type) query = query.eq('metadata->>kind', type);
 
   const { data, error, count } = await query;
   if (error) throw new ApiError('INTERNAL_ERROR', error.message);
@@ -39,6 +40,7 @@ export const GET = handle(async (req) => {
   return ok({
     certificates: rows.map(({ users, ...c }) => ({
       ...c,
+      type: effectiveType(c),
       amount: Number(c.amount),
       user_email: users?.email ?? null,
       image_url: certificateImageUrl(c.id),
