@@ -45,14 +45,26 @@ export const GET = handle(async (req) => {
   // Aggregate stats over the whole account, not just this page.
   const { data: allClosed } = await supabaseAdmin()
     .from('orders')
-    .select('pnl')
+    .select('pnl, side, closed_at')
     .eq('account_id', account_id)
-    .in('status', ['closed', 'liquidated']);
+    .in('status', ['closed', 'liquidated'])
+    .order('closed_at', { ascending: true });
 
-  const closedRows = (allClosed ?? []) as Array<{ pnl: number | null }>;
+  const closedRows = (allClosed ?? []) as Array<{ pnl: number | null; side: string; closed_at: string | null }>;
   const pnls: number[] = closedRows.map((r) => Number(r.pnl ?? 0));
   const wins = pnls.filter((p) => p > 0).length;
   const losses = pnls.filter((p) => p <= 0).length;
+
+  // Performance statistics (prop-firm dashboard style), over every closed trade of the account.
+  const winPnls = pnls.filter((p) => p > 0), lossPnls = pnls.filter((p) => p < 0);
+  const grossProfit = winPnls.reduce((a, b) => a + b, 0);
+  const grossLoss = Math.abs(lossPnls.reduce((a, b) => a + b, 0));
+  let streakW = 0, streakL = 0, maxW = 0, maxL = 0;
+  for (const p of pnls) {
+    if (p > 0) { streakW += 1; streakL = 0; } else { streakL += 1; streakW = 0; }
+    maxW = Math.max(maxW, streakW); maxL = Math.max(maxL, streakL);
+  }
+  const days = new Set(closedRows.map((r) => (r.closed_at ?? '').slice(0, 10)).filter(Boolean));
 
   return ok({
     orders: orders.map((o) => ({
@@ -81,6 +93,19 @@ export const GET = handle(async (req) => {
       losses,
       win_rate: pnls.length ? pct((wins / pnls.length) * 100) : 0,
       net_pnl: money(pnls.reduce((s: number, p: number) => s + p, 0)),
+      gross_profit: money(grossProfit),
+      gross_loss: money(grossLoss),
+      profit_factor: grossLoss > 0 ? Math.round((grossProfit / grossLoss) * 100) / 100 : null,
+      avg_win: winPnls.length ? money(grossProfit / winPnls.length) : 0,
+      avg_loss: lossPnls.length ? money(-grossLoss / lossPnls.length) : 0,
+      expectancy: pnls.length ? money(pnls.reduce((a, b) => a + b, 0) / pnls.length) : 0,
+      best_trade: pnls.length ? money(Math.max(...pnls)) : 0,
+      worst_trade: pnls.length ? money(Math.min(...pnls)) : 0,
+      max_win_streak: maxW,
+      max_loss_streak: maxL,
+      longs: closedRows.filter((r) => r.side === 'long').length,
+      shorts: closedRows.filter((r) => r.side === 'short').length,
+      trading_days: days.size,
     },
   });
 });
