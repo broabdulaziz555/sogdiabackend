@@ -37,7 +37,6 @@ export const POST = handle(async (req) => {
 
   const mark = await getPrice(order.symbol);
   const long = order.side === 'long';
-  const liq = Number(order.liquidation_price);
 
   if (body.take_profit != null) {
     const valid = long ? body.take_profit > mark : body.take_profit < mark;
@@ -55,13 +54,6 @@ export const POST = handle(async (req) => {
       throw new ApiError(
         'VALIDATION_ERROR',
         `Stop-loss must be ${long ? 'below' : 'above'} the current price (${mark}).`,
-      );
-    }
-    const beyondLiq = long ? body.stop_loss <= liq : body.stop_loss >= liq;
-    if (beyondLiq) {
-      throw new ApiError(
-        'VALIDATION_ERROR',
-        `Stop-loss sits beyond the liquidation price (${liq}) — it could never trigger.`,
       );
     }
   }
