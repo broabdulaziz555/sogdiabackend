@@ -3,7 +3,7 @@ import { handle, ok, readJson } from '@/lib/http';
 import { requireStaff } from '@/lib/permissions';
 import { supabaseAdmin } from '@/lib/supabase';
 import { storageType } from '@/lib/certificateCopy';
-import { certificateElement, type CertificateRow } from '@/lib/certificateImage';
+import { certificateElement, certificateImageOptions, type CertificateRow } from '@/lib/certificateImage';
 import { certificatePreviewSchema } from '@/lib/validation';
 
 export const runtime = 'nodejs';
@@ -40,6 +40,6 @@ export const POST = handle(async (req) => {
     accounts,
   } as unknown as CertificateRow;
 
-  const png = Buffer.from(await new ImageResponse(certificateElement(row), { width: 1200, height: 850 }).arrayBuffer());
+  const png = Buffer.from(await new ImageResponse(certificateElement(row), certificateImageOptions()).arrayBuffer());
   return ok({ image: `data:image/png;base64,${png.toString('base64')}` });
 });

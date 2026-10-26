@@ -1,6 +1,6 @@
 import { ImageResponse } from 'next/og';
 import { supabaseAdmin } from '@/lib/supabase';
-import { certificateElement, type CertificateRow } from '@/lib/certificateImage';
+import { certificateElement, certificateImageOptions, type CertificateRow } from '@/lib/certificateImage';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -34,8 +34,7 @@ export async function GET(_req: Request, ctx: { params: { id: string } }) {
   return new ImageResponse(
     certificateElement(data),
     {
-      width: 1200,
-      height: 850,
+      ...certificateImageOptions(),
       headers: { 'cache-control': 'public, max-age=600, s-maxage=86400' },
     },
   );
